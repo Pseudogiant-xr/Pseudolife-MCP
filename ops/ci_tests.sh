@@ -53,20 +53,22 @@ trap cleanup EXIT
 # timeout cancelled the hung 2026-09-22 run, GitHub kept neither. SIGABRT,
 # not TERM: pytest enables faulthandler in the controller and every xdist
 # worker, so each one prints all its thread stacks as it dies, including a
-# hang outside any single test. 72 min: the slowest run this bound must
-# clear is the frozen-inclusive one (--include-frozen below: a release cut,
-# a freeze exception, the weekly nightly), 2 xdist workers on a 4-CPU
-# ubuntu-latest runner with the real embedder, whose time depends on the
-# CPU the runner draws. On 2026-11-25 batch run 45512966117 took 49:07 on an
-# AMD EPYC 7763 (job 138890627461). On 2026-11-26 the 0.26.0 cut batch run
-# 45747873168 took 39:35 on an Intel Xeon (job 139668302754), and the old
-# 50-minute bound killed its two EPYC 7763 attempts at 99% after 50:28 and
-# 50:12 (jobs 139683568984, 139702370385), where the tests they shared with
-# the Intel attempt ran 1.26-1.27x slower; so an EPYC run takes about 51
-# minutes, and 72 is about 40% over it. The live files alone took 29:34 to
-# 30:35 (jobs 138165166960, 139459508063, 139591914723, 2026-11-24/25).
-# Install plus a cold embedder download (up to ~10 min) and the kill grace
-# must still fit inside the job's 87 (tests/test_hang_diagnostics.py).
+# hang outside any single test. The bound depends on the selection, so a
+# hang in an ordinary run still ends as early as before; both runs use 2
+# xdist workers on a 4-CPU ubuntu-latest runner with the real embedder, and
+# their time depends on the CPU the runner draws. 50 min for the live files
+# (issue #1408): they took 29:34 to 30:35 on 2026-11-24/25 (jobs
+# 138165166960, 139459508063, 139591914723), so 50 leaves more than 40%.
+# 72 min with the frozen files (--include-frozen below: a release cut, a
+# freeze exception, the weekly nightly): on 2026-11-26 the 0.26.0 cut batch
+# run 45747873168 took 39:35 on an Intel Xeon (job 139668302754), and the
+# 50-minute bound killed its two AMD EPYC 7763 attempts at 99% after 50:28
+# and 50:12 (jobs 139683568984, 139702370385) with only seconds of tests
+# left, so an EPYC run takes at least about 51 minutes (2026-11-25 run
+# 45512966117 took 49:07 on that CPU, job 138890627461); 72 is about 40%
+# over 51. Install plus a cold embedder download (up to ~10 min) and the
+# kill grace must still fit inside the job's 87 (tests/
+# test_hang_diagnostics.py).
 # ops/pytest_failure_lines.py prints `FAILED <node id> - <reason>` the moment
 # a test fails, so a run killed before its summary still names it, and
 # appends each test phase's seconds to ci-results/test-times.tsv, so a
@@ -81,8 +83,10 @@ trap cleanup EXIT
 # reach every pytest a test starts as well, and the suite's own collection
 # tests start several.
 frozen=()
+bound=50m
 if [[ "${PSEUDOLIFE_CI_INCLUDE_FROZEN:-}" == true ]]; then
     frozen=(--include-frozen)
+    bound=72m
 fi
 profile=()
 case "${PSEUDOLIFE_SUITE_PROFILE:-}" in
@@ -96,7 +100,7 @@ export PSEUDOLIFE_CI_TEST_TIMES="$PWD/ci-results/test-times.tsv"
 : > "$PSEUDOLIFE_CI_TEST_TIMES"
 set +e
 /usr/bin/time -v -o ci-results/process.txt \
-    timeout --signal=ABRT --kill-after=60s 72m \
+    timeout --signal=ABRT --kill-after=60s "$bound" \
     python -m pytest -p ops.pytest_failure_lines ${frozen[@]+"${frozen[@]}"} ${profile[@]+"${profile[@]}"} -q -n 2 --dist loadfile -ra \
     --durations=50 --durations-min=1 --junitxml=ci-results/junit.xml "$@"
 test_status=$?

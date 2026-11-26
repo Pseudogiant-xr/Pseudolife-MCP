@@ -145,8 +145,9 @@ python_files = ["test_*.py"]
 # runs longer than this; the test keeps running. Measured 2026-09-25 over
 # four green master CI runs (2026-09-23/24, ubuntu-latest, -n 2): the
 # slowest item took 71.6 s (test_memcot_bench graph arm), the next 32.8 s.
-# 600 s is ~8x that and fires 40 minutes before the 50-minute job timeout
-# that cancelled the hung 2026-09-22 run with no log.
+# 600 s is ~8x that and fires well before ops/ci_tests.sh's pytest bound
+# (tests/test_hang_diagnostics.py); the 50-minute job timeout of the time
+# cancelled the hung 2026-09-22 run with no log.
 faulthandler_timeout = 600
 markers = [
     "slow: needs external infrastructure (a built docker image); skips itself when absent",
