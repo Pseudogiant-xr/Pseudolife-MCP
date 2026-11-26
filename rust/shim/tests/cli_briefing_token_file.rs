@@ -12,7 +12,11 @@ use std::{
 
 /// Runs `briefing` against a scripted daemon and returns its output and the
 /// request heads the daemon received.
-fn briefing(home: &Path, env: &[(&str, &std::ffi::OsStr)]) -> (std::process::Output, Vec<String>) {
+fn briefing(
+    home: &Path,
+    args: &[&str],
+    env: &[(&str, &std::ffi::OsStr)],
+) -> (std::process::Output, Vec<String>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let address = listener.local_addr().unwrap();
@@ -61,7 +65,7 @@ fn briefing(home: &Path, env: &[(&str, &std::ffi::OsStr)]) -> (std::process::Out
         .env("USERPROFILE", home)
         .env("LOCALAPPDATA", home)
         .env("PSEUDOLIFE_MCP_DAEMON_URL", format!("http://{address}"))
-        .arg("briefing")
+        .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -99,13 +103,21 @@ fn line(text: &str) -> Vec<u8> {
 fn briefing_sends_the_token_file_bearer_without_a_token_variable() {
     let home = DisposableHome::new();
     let token = home.private_token("client.token", b"file-secret\n");
-    let (output, requests) = briefing(&home.0, &[("PSEUDOLIFE_MCP_TOKEN_FILE", token.as_os_str())]);
+    let (output, requests) = briefing(
+        &home.0,
+        &["briefing"],
+        &[("PSEUDOLIFE_MCP_TOKEN_FILE", token.as_os_str())],
+    );
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert_eq!(output.stdout, line("briefed"));
     assert!(output.stderr.is_empty(), "{output:?}");
     assert_eq!(requests.len(), 2, "{requests:?}");
     assert!(requests[0].starts_with("GET /health HTTP/1.1\r\n"));
-    assert!(!requests[0].to_ascii_lowercase().contains("\r\nauthorization:"));
+    assert!(
+        !requests[0]
+            .to_ascii_lowercase()
+            .contains("\r\nauthorization:")
+    );
     assert!(requests[1].starts_with("GET /api/briefing?"));
     assert!(
         requests[1]
@@ -121,6 +133,7 @@ fn briefing_prefers_the_token_file_over_a_stale_token_variable() {
     let token = home.private_token("client.token", b"file-secret");
     let (output, requests) = briefing(
         &home.0,
+        &["briefing"],
         &[
             ("PSEUDOLIFE_MCP_TOKEN_FILE", token.as_os_str()),
             ("PSEUDOLIFE_MCP_TOKEN", "stale-secret".as_ref()),
@@ -129,7 +142,10 @@ fn briefing_prefers_the_token_file_over_a_stale_token_variable() {
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert_eq!(output.stdout, line("briefed"));
     let headers = requests[1].to_ascii_lowercase();
-    assert!(headers.contains("\r\nauthorization: bearer file-secret\r\n"), "{requests:?}");
+    assert!(
+        headers.contains("\r\nauthorization: bearer file-secret\r\n"),
+        "{requests:?}"
+    );
     assert!(!headers.contains("stale-secret"));
 }
 
@@ -139,13 +155,50 @@ fn briefing_with_a_missing_token_file_sends_no_payload_request() {
     let missing = home.path("absent.token");
     let (output, requests) = briefing(
         &home.0,
+        &["briefing"],
         &[
             ("PSEUDOLIFE_MCP_TOKEN_FILE", missing.as_os_str()),
             ("PSEUDOLIFE_MCP_TOKEN", "stale-secret".as_ref()),
         ],
     );
     assert_eq!(output.status.code(), Some(0), "{output:?}");
-    assert!(output.stdout.is_empty() && output.stderr.is_empty(), "{output:?}");
+    assert!(
+        output.stdout.is_empty() && output.stderr.is_empty(),
+        "{output:?}"
+    );
     assert_eq!(requests.len(), 1, "{requests:?}");
     assert!(requests[0].starts_with("GET /health HTTP/1.1\r\n"));
+}
+
+#[test]
+fn session_start_hook_sends_the_token_file_bearer() {
+    // The settings.json hook a client-only install without the plugin runs.
+    let home = DisposableHome::new();
+    let token = home.private_token(
+        "client.token",
+        b"file-secret
+",
+    );
+    let (output, requests) = briefing(
+        &home.0,
+        &["briefing", "--hook-json"],
+        &[("PSEUDOLIFE_MCP_TOKEN_FILE", token.as_os_str())],
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.starts_with("{\"hookSpecificOutput\": {\"hookEventName\": \"SessionStart\""),
+        "{stdout}"
+    );
+    assert_eq!(requests.len(), 2, "{requests:?}");
+    assert!(requests[1].starts_with("GET /api/hook/session-start"));
+    assert!(
+        requests[1].to_ascii_lowercase().contains(
+            "
+authorization: bearer file-secret
+"
+        ),
+        "{requests:?}"
+    );
 }
