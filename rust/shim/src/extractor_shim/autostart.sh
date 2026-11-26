@@ -6,6 +6,9 @@ native=$1 kind=$2 env_file=$3 name=$4 replace=$5 port=$6 host=$7 timeout=$8 coun
 shift 9
 serve=("${@:1:count}")
 shift "$count"
+# An IPv6 literal is bracketed in a URL.
+url_host=$host
+if [[ $host == *:* && $host != \[* ]]; then url_host="[$host]"; fi
 unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 unit="$unit_dir/$name"
 wants="$unit_dir/default.target.wants/$name"
@@ -60,7 +63,7 @@ healthy_listener() {
     unit_group="$(systemctl --user show "$name" --property ControlGroup --value)"
     for pid in $(socket_pids "$(ss -H -ltnp "sport = :$port")"); do
         if owned_by_unit "$pid" && [ "$(readlink "/proc/$pid/exe" 2>/dev/null || true)" = "$owner_exe" ] &&
-            curl --silent --fail --max-time 2 "http://$host:$port/health" >/dev/null &&
+            curl --silent --fail --max-time 2 "http://$url_host:$port/health" >/dev/null &&
             "$owner_exe" extractor-shim verify-settings "$pid" "${serve[@]:1}" >/dev/null 2>&1; then
             return 0
         fi

@@ -193,6 +193,37 @@ fn default_log(
     ))
 }
 
+/// Refuse a value that would split the generated systemd unit's lines or
+/// the task's arguments: a line feed, a carriage return or a NUL.
+fn refuse_line_break(label: &str, value: &std::ffi::OsStr) -> Result<(), String> {
+    if value
+        .as_encoded_bytes()
+        .iter()
+        .any(|b| matches!(b, b'\n' | b'\r' | 0))
+    {
+        return Err(format!(
+            "{label} contains a line break or NUL ({}), which a service definition cannot hold; choose a path or value without one, then retry",
+            value.to_string_lossy().escape_debug()
+        ));
+    }
+    Ok(())
+}
+
+/// [`refuse_line_break`] for every value in `--key value` settings (the
+/// provider comes first).
+fn refuse_line_breaks(settings: &[OsString]) -> Result<(), String> {
+    for (at, value) in settings.iter().enumerate().skip(1) {
+        let flag = settings[at - 1].to_string_lossy();
+        let label = if flag.starts_with("--") {
+            &*flag
+        } else {
+            "an argument"
+        };
+        refuse_line_break(label, value)?;
+    }
+    Ok(())
+}
+
 pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
     if args.is_empty() || args.iter().any(|a| a == "--help") {
         println!(
@@ -239,6 +270,14 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
     }
     if !["Interactive", "S4U"].contains(&logon.as_str()) {
         return Err("task logon type must be Interactive or S4U".into());
+    }
+    // Before anything reads or writes: a value the unit or task would carry.
+    // Removal writes no service definition, so it is never blocked here.
+    if !remove {
+        refuse_line_breaks(&settings)?;
+        if let Some(launcher) = &launcher {
+            refuse_line_break("--native-exe", launcher.as_os_str())?;
+        }
     }
     let find = |key: &str| {
         settings
@@ -392,6 +431,18 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
             "--receipt-dir".into(),
             receipt_dir.to_string_lossy().into_owned(),
         ]);
+    }
+    // Everything the helper writes into the unit, the task or the settings
+    // file, as resolved (the CLI found, the host, a receipt directory from
+    // XDG_CACHE_HOME), before it runs.
+    if !remove {
+        refuse_line_break("--host", std::ffi::OsStr::new(host))?;
+        refuse_line_break("--native-exe", native.as_os_str())?;
+        refuse_line_break("this pseudolife-mcp's own path", owner_exe.as_os_str())?;
+        for args in [&serve_args, &config_args] {
+            let args: Vec<OsString> = args.iter().map(OsString::from).collect();
+            refuse_line_breaks(&args)?;
+        }
     }
     let status = if cfg!(windows) {
         let script_bytes = include_bytes!("autostart.ps1");
@@ -942,5 +993,184 @@ PSEUDOLIFE_CODEX_SHIM_LOG=
                 .is_some()
         );
         let _ = fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(test)]
+mod line_break_tests {
+    use super::{install, refuse_line_break, refuse_line_breaks};
+    use std::ffi::{OsStr, OsString};
+
+    #[test]
+    fn every_line_break_and_nul_is_refused_with_its_flag() {
+        for bad in ["a\nb", "a\rb", "a\0b"] {
+            let error = refuse_line_break("--repo", OsStr::new(bad)).unwrap_err();
+            assert!(
+                error.starts_with("--repo contains a line break or NUL"),
+                "{error}"
+            );
+        }
+        // A curly quote, a space or a tab is an ordinary path character.
+        for good in ["D:\\Apps\\O\u{2019}Brien\\x", "/home/a b/x", "a\tb", "::1"] {
+            assert!(
+                refuse_line_break("--repo", OsStr::new(good)).is_ok(),
+                "{good:?}"
+            );
+        }
+        let settings: Vec<OsString> = ["claude", "--cli", "/opt/cl\naude", "--port", "8082"]
+            .map(OsString::from)
+            .into();
+        assert!(
+            refuse_line_breaks(&settings)
+                .unwrap_err()
+                .starts_with("--cli contains")
+        );
+    }
+
+    #[test]
+    fn install_refuses_before_reading_or_writing_anything() {
+        let missing = std::env::temp_dir().join(format!(
+            "pl-autostart-{}\nExecStartPre=/bin/false",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let args: Vec<OsString> = vec![
+            "claude".into(),
+            "--env-file".into(),
+            missing.clone().into_os_string(),
+            "--port".into(),
+            "18082".into(),
+        ];
+        let error = match install(&args, false) {
+            Err(super::Failure::Other(message)) => message,
+            Err(super::Failure::Locked) => panic!("expected a refusal, got a task lock"),
+            Ok(()) => panic!("expected a refusal"),
+        };
+        assert!(
+            error.starts_with("--env-file contains a line break"),
+            "{error}"
+        );
+        assert!(!missing.exists());
+    }
+
+    /// Removal writes no service definition, so the same value never blocks
+    /// it: a unit of this unique name is absent, so nothing is touched.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn uninstall_is_not_blocked_by_a_line_break() {
+        let name = format!("pl-w129-{}.service", uuid::Uuid::new_v4().simple());
+        let args: Vec<OsString> = vec![
+            "claude".into(),
+            "--name".into(),
+            name.into(),
+            "--env-file".into(),
+            "/nonexistent/a\nb.env".into(),
+        ];
+        assert!(install(&args, true).is_ok());
+    }
+
+    /// The health URL brackets an IPv6 host and leaves the others alone.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_unit_script_brackets_an_ipv6_health_host() {
+        let script = include_str!("autostart.sh");
+        let start = script.find("url_host=$host").unwrap();
+        let end = start + script[start..].find("unit_dir=").unwrap();
+        for (host, expected) in [
+            ("127.0.0.1", "127.0.0.1"),
+            ("::1", "[::1]"),
+            ("[::1]", "[::1]"),
+            ("localhost", "localhost"),
+        ] {
+            let output = std::process::Command::new("bash")
+                .arg("-c")
+                .arg(format!(
+                    "set -euo pipefail\nhost=$1\n{}printf %s \"$url_host\"",
+                    &script[start..end]
+                ))
+                .arg("bash")
+                .arg(host)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+        }
+    }
+}
+
+#[cfg(all(test, windows))]
+mod quote_tests {
+    use super::*;
+
+    /// A profile path with any of PowerShell's five single-quote characters
+    /// survives the generated task code: it parses, and each literal holds
+    /// exactly the value it was given. The parser's round trip agrees.
+    #[test]
+    fn task_code_keeps_every_quote_character_in_paths() {
+        let embedded = include_str!("autostart.ps1");
+        let header = &embedded[..embedded.find("$native =").unwrap()];
+        // Through Get-RegisteredInvocation, which reads a task's code back.
+        let functions = &embedded[embedded.find("function Get-NativeTaskCode(").unwrap()
+            ..embedded.find("function Stop-CapturedProcess(").unwrap()];
+        let check = r#"
+$code = Get-NativeTaskCode ([string]$c.Native) ([string]$c.Arguments) ([string]$c.OwnerExe)
+$encodedCode = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($code))
+$task = [PSCustomObject]@{Actions=@([PSCustomObject]@{Execute='C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'; Arguments="-NoProfile -EncodedCommand $encodedCode"})}
+$found = @(Get-RegisteredInvocation $task)
+if ($found.Count -ne 1 -or $found[0].Exe -cne [string]$c.Native -or $found[0].RuntimeExe -cne [string]$c.OwnerExe) { [Console]::Out.WriteLine("registration not recognised"); exit 1 }
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($code, [ref]$null, [ref]$errors)
+if ($errors.Count) { [Console]::Out.WriteLine("parse error: " + $errors[0].Message); exit 1 }
+$literals = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $n.StringConstantType -eq 'SingleQuoted' }, $true) | ForEach-Object { $_.Value })
+$want = @([string]$c.OwnerExe, [string]$c.Native, [string]$c.Arguments)
+if ($literals.Count -ne 3) { [Console]::Out.WriteLine("literals: " + $literals.Count); exit 1 }
+for ($i = 0; $i -lt 3; $i++) {
+    if ($literals[$i] -cne $want[$i]) { [Console]::Out.WriteLine("literal $i differs"); exit 1 }
+    if ((ConvertFrom-QuotedLiteralBody (ConvertTo-QuotedLiteralBody $want[$i])) -cne $want[$i]) { [Console]::Out.WriteLine("round trip $i differs"); exit 1 }
+}
+if ($urlHost -cne [string]$c.UrlHost) { [Console]::Out.WriteLine("url host differs"); exit 1 }
+[Console]::Out.WriteLine('ok')
+"#;
+        let url = &embedded[embedded.find("# An IPv6 literal is bracketed").unwrap()
+            ..embedded.find("function Stop-TaskLocked(").unwrap()];
+        let source = format!("{header}\n{url}\n{functions}\n{check}");
+        for (native, owner, arguments, host, url_host) in [
+            (
+                "D:\\Apps\\O\u{2019}Brien\\launcher.exe",
+                "D:\\Apps\\O\u{2018}Brien\u{201A}x\u{201B}\\runtime.exe",
+                "extractor-shim claude --env-file \"D:\\Apps\\O\u{2019}Brien's\\settings.env\"",
+                "::1",
+                "[::1]",
+            ),
+            (
+                "C:\\plain\\launcher.exe",
+                "C:\\plain\\runtime.exe",
+                "extractor-shim codex --env-file \"C:\\plain\\settings.env\"",
+                "127.0.0.1",
+                "127.0.0.1",
+            ),
+        ] {
+            let data = serde_json::to_vec(&json!({
+                "Native": native, "OwnerExe": owner, "Arguments": arguments,
+                "Host": host, "UrlHost": url_host,
+            }))
+            .unwrap();
+            let mut scratch = Scratch::create(
+                std::env::temp_dir().join(format!("autostart-quotes-{}", uuid::Uuid::new_v4())),
+            )
+            .unwrap();
+            let script = scratch.write("register.ps1", source.as_bytes()).unwrap();
+            let file = scratch.write("registration.json", &data).unwrap();
+            let output = windows_registration_command(&script, &file, source.as_bytes(), &data)
+                .unwrap()
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert_eq!(
+                (output.status.code(), stdout.trim()),
+                (Some(0), "ok"),
+                "{native}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 }

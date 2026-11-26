@@ -129,7 +129,9 @@ function Format-TaskLock($lock, [switch]$Removal, [string]$Follows, [string]$Rea
     # -Follows names the settings file a task this shell cannot change still
     # reads at every start: the command is then only for a user who wants a
     # task of their own. -Reason says why the task cannot be followed.
-    $quoted = $lock.TaskName.Replace("'", "''")
+    # PowerShell ends a single-quoted string at ' and at each curly quote
+    # U+2018-U+201B, so each one is doubled in the pasted command.
+    $quoted = -join @($lock.TaskName.ToCharArray() | ForEach-Object { if ([int]$_ -eq 0x27 -or ([int]$_ -ge 0x2018 -and [int]$_ -le 0x201B)) { [string]$_ + $_ } else { [string]$_ } })
     if ($lock.Hidden) {
         return ("a scheduled task named '$($lock.TaskName)' exists but this account cannot read it, " +
                 "so it belongs to another account on this machine; nothing was changed. Ask that account to remove it")
