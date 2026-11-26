@@ -1109,7 +1109,9 @@ mod tests {
         // the base file's image, the retired Python daemon.
         assert!(!missing.0.contains("docker compose"), "{missing:?}");
         assert!(
-            missing.0.contains("recreate it the way this bank was deployed"),
+            missing
+                .0
+                .contains("recreate it the way this bank was deployed"),
             "{missing:?}"
         );
         let down = bank.inspect("d").unwrap_err();
