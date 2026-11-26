@@ -411,7 +411,8 @@ def test_a_docs_lane_skip_needs_the_heads_own_finished_run(integrate, monkeypatc
             json.loads(api(*args)) | {"path": ".github/workflows/ci.yml"}) if "/runs/" in args[1] else api(*args))
     required, why = evals_member(rollup)
     assert required is None
-    assert ("rerun the Rust workflow" if case in RERUN else "retry build once it has") in why
+    assert ("rerun the Rust workflow" if case in RERUN
+            else "retry build (or open, if open reported this) once it has") in why
     value = member(integrate)
     value.snapshot_required = None
     value.snapshot, value.snapshot_why = integrate._snapshot_state(SHA, rollup, None)
@@ -458,8 +459,14 @@ def test_another_runs_rust_jobs_do_not_undo_the_heads_skip(integrate, monkeypatc
 
 
 @pytest.mark.parametrize("since_build,refusal", [
-    ("still skipped", None), ("rerun ran the lanes", "pending"), ("rerun going", "has not shown"),
-    ("head moved", "head moved since snapshot admission"),
+    pytest.param("still skipped", None, id="still skipped"),
+    pytest.param("rerun ran the lanes", "pending", id="rerun ran the lanes"),
+    # Inside `open` the batch is built, so the retry must name open too.
+    pytest.param("rerun going", r"has not shown .*retry build \(or open, if open reported this\) once it has",
+                 id="rerun going"),
+    pytest.param("unreadable", r"could not be read \(HTTP 502: bad gateway\); "
+                 r"retry build \(or open, if open reported this\)", id="unreadable"),
+    pytest.param("head moved", "head moved since snapshot admission", id="head moved"),
 ])
 def test_open_reads_a_ci_scope_skip_again(integrate, monkeypatch, since_build, refusal):
     # `build` admitted the member on its run's skip; a rerun before `open`
@@ -469,6 +476,11 @@ def test_open_reads_a_ci_scope_skip_again(integrate, monkeypatch, since_build, r
                               "latest": [("Scope", "in_progress", None)]}}.get(since_build, {})
     rollup = _rust_run(monkeypatch, integrate, **kwargs)
     api = integrate.gh
+    if since_build == "unreadable":
+        def api(*args, _api=api):
+            if "/attempts/" in args[1]:
+                raise integrate.Refusal("HTTP 502: bad gateway")
+            return _api(*args)
     head = "b" * 40 if since_build == "head moved" else SHA
     monkeypatch.setattr(integrate, "gh", lambda *args: json.dumps({"headRefOid": head, "statusCheckRollup": rollup})
                         if args[:2] == ("pr", "view") else api(*args))
@@ -492,6 +504,42 @@ def test_unreadable_scope_metadata_waits_and_names_the_cause(integrate, monkeypa
     required, why = evals_member(rollup)
     assert required is None
     assert "scope job metadata could not be read (HTTP 502: bad gateway)" in why and "retry build" in why
+
+
+def _paged_jobs(monkeypatch, integrate, jobs, *, total=None, per_page=100):
+    """`gh api` serving one attempt's job list `per_page` at a time; returns
+    the pages requested."""
+    requested = []
+
+    def gh(*args):
+        found = re.search(r"/runs/9/attempts/2/jobs\?per_page=100&page=(\d+)$", args[1])
+        assert found, args
+        page = int(found.group(1))
+        requested.append(page)
+        return json.dumps({"total_count": len(jobs) if total is None else total,
+                           "jobs": jobs[(page - 1) * per_page:page * per_page]})
+
+    monkeypatch.setattr(integrate, "gh", gh)
+    return requested
+
+
+def test_an_attempts_job_list_is_read_across_pages(integrate, monkeypatch):
+    # A matrix-heavy run lists more than one page of jobs; the snapshot job
+    # can sit on a later page, and missing it would waive a required replay.
+    jobs = [{"name": f"Parity / shard {n}", "status": "completed", "conclusion": "success"}
+            for n in range(150)] + [{"name": "Rust / ubuntu-latest", "status": "in_progress", "conclusion": None}]
+    requested = _paged_jobs(monkeypatch, integrate, jobs)
+    assert integrate._attempt_jobs(9, 2) == jobs
+    assert requested == [1, 2]
+
+
+def test_a_job_list_that_ends_short_of_its_count_is_unread(integrate, monkeypatch):
+    # GitHub reported 151 jobs but the pages ran out at 100: a verdict from
+    # the partial list could miss the snapshot job, so it is not given.
+    jobs = [{"name": f"Parity / shard {n}", "status": "completed", "conclusion": "success"} for n in range(100)]
+    _paged_jobs(monkeypatch, integrate, jobs, total=151)
+    with pytest.raises(ValueError, match="the jobs of run 9 attempt 2 ended at 100 of 151"):
+        integrate._attempt_jobs(9, 2)
 
 
 @pytest.mark.parametrize("raw", [

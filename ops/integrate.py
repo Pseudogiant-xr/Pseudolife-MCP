@@ -596,6 +596,11 @@ def _snapshot_requirement(member: Member, base: str,
     return {"skipped": (False, ""), "ran": (True, "")}.get(state, (None, why))
 
 
+# `build` reads the scope skip to admit a member and `open` reads it again
+# before publishing, so a retry names whichever of the two reported it.
+_SCOPE_RETRY = "retry build (or open, if open reported this)"
+
+
 def _scope_skip(sha: str, rollup: list[dict] | None) -> tuple[str, str]:
     """How the head's own pull-request run of the Rust workflow treated its
     Rust lanes: `skipped` only once that run's latest attempt completed
@@ -607,7 +612,7 @@ def _scope_skip(sha: str, rollup: list[dict] | None) -> tuple[str, str]:
     of the run's latest attempt, as ops/ci_batch_passed.py reads one, so a
     rerun's own jobs decide. Reads Actions metadata, never logs."""
     wait = ("the Rust workflow has not shown on the PR head whether its scope skips the Rust "
-            "lanes (its pull-request run has not finished); retry build once it has")
+            "lanes (its pull-request run has not finished); " + _SCOPE_RETRY + " once it has")
     try:
         runs: dict[int, dict] = {}
         for check in rollup or []:
@@ -644,7 +649,7 @@ def _scope_skip(sha: str, rollup: list[dict] | None) -> tuple[str, str]:
                            "showing that its scope skipped the Rust lanes; rerun the Rust workflow or "
                            "push a new commit")
     except (Refusal, KeyError, TypeError, ValueError) as exc:
-        return "pending", _unread("the Rust workflow's scope job metadata", exc) + "; retry build"
+        return "pending", _unread("the Rust workflow's scope job metadata", exc) + "; " + _SCOPE_RETRY
 
 
 def _attempt_jobs(run_id: int, attempt: int) -> list[dict]:
