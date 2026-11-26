@@ -3619,7 +3619,9 @@ for selected_client in $CLIENTS; do
                                     MCP_GEMINI=present-upgraded
                                 fi
                             else
-                                warn_client_failure gemini "the Gemini CLI registration still names $registered_shim, which nothing upgrades any more: the native client was installed but the registration could not be moved to it (see above). Move it by hand: \"$SHIM_PATH\" installer migrate-registrations --client gemini"
+                                # Only the native launcher itself reaches here
+                                # (the bare command takes the branch below).
+                                warn_client_failure gemini "the Gemini CLI registration names the native launcher $registered_shim, but the native client could not confirm it (see above), so the registration was left as it is. Check it with \"$SHIM_PATH\" installer migrate-registrations --client gemini, then rerun the installer."
                             fi
                         elif shim_registration_migrates gemini; then
                             if [ "$SHIM_MIGRATED" = current ]; then

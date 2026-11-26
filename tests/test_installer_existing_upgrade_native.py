@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -341,10 +342,11 @@ def test_install_sh_gemini_rerun_on_the_native_launcher_names_its_command(
     calls = (tmp_path / "calls.txt").read_text(encoding="utf-8").splitlines()
     assert "launcher|installer migrate-registrations --client gemini" in calls
     if migrate_exit == 3:
-        launcher = tmp_path / "installed-bin" / "pseudolife-mcp"
-        assert "the Gemini CLI registration still names " in output
-        assert "still names , which" not in output
-        assert launcher.name in output.split("still names ", 1)[1].split(",", 1)[0]
+        # The registered command, as the selected Bash spells the fixture path.
+        named = re.search(r"registration names the native launcher (\S+), but the native client could not confirm it", output)
+        assert named, output
+        assert re.search(r"installed-bin[\\/]pseudolife-mcp$", named.group(1)), named.group(1)
+        assert "nothing upgrades any more" not in output
 
 
 @pytest.mark.parametrize("value", TRUTHY_NO_SPAWN)
