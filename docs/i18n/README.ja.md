@@ -1,8 +1,8 @@
-<!-- i18n-sync: v14 -->
+<!-- i18n-sync: v15 -->
 
 # Pseudolife-MCP
 
-[英語版 README(正典)](../../README.md) — 同期バージョン: v14 (2026-11-26)
+[英語版 README(正典)](../../README.md) — 同期バージョン: v15 (2026-11-26)
 
 **Claude Code、Codex、その他の MCP クライアントに永続的な長期メモリを提供します。**
 
@@ -29,27 +29,13 @@ ops\install.ps1         # Windows (pwsh 7+)
 
 何を尋ね、何を構築するかは、下の「永続ティア」の節にあります。
 
-代わりに lite ティア(Python パッケージなので、ホストに Python が必要です)を試すなら、コマンド 2 つだけです。Docker も、セットアップが必要なデータベースも、コンテナランタイムも不要です:
+あとは、コーディングエージェントで *「ステージングのマシンは haze-02 だと覚えておいて」* と伝えるだけです。数日後の新しいセッションで *「ステージングはどのマシン?」* と尋ねれば、メモリから答えが返ってきます。すべての内容は `http://127.0.0.1:8765/ui/` の Cortex Console で閲覧できます。
 
-```bash
-pip install "pseudolife-mcp[lite]"
-claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
-```
-
-Claude Code の代わりに Codex を使う場合も、手順は同じです:
-
-```bash
-pip install "pseudolife-mcp[lite]"
-codex mcp add pseudolife-memory -- pseudolife-mcp
-```
-
-あとは、どちらのコーディングエージェントでも *「ステージングのマシンは haze-02 だと覚えておいて」* と伝えるだけです。数日後の新しいセッションで *「ステージングはどのマシン?」* と尋ねれば、メモリから答えが返ってきます。すべての内容は `http://127.0.0.1:8765/ui/` の Cortex Console で閲覧できます。
-
-最初のセッションでデーモンが自動的に起動し、組み込みの PostgreSQL をプロビジョニングして埋め込みモデルをダウンロードします(これは初回のみの処理です)。Lite にはドリーム**抽出器**(extractor)が同梱されていないため、正準的なファクトは自動では現れません。この構成では、OpenAI 互換エンドポイントを設定するまで `memory_fact_set` だけが唯一の**コーテックス**(cortex)書き込み手段になります。
+lite ティア(組み込みの PostgreSQL バンクを持ち、Docker を使わない pip パッケージ)は廃止されました。lite バンクがまだ残っているマシンでは、インストーラーが処理を拒否します。先に [lite バンクを Docker へ移行する](../guide/configuration.md#move-a-lite-bank-to-docker) の手順でそのバンクを移行してください。停止したバンクをバックアップし、新しい Docker バンクに復元します。
 
 ### 永続ティア — Docker
 
-長期運用するバンクには、上記のすべてに加えて、同梱の抽出器、外部ボリューム、ヘルスチェック付きのサービス群、バックアップ/ロールバックのしくみが必要です。Docker と、MCP 対応のコーディングエージェントが少なくとも 1 つ必要です — Claude Code、Codex、Gemini CLI はエンドツーエンドで接続済みで、それ以外のエージェントにはそのまま貼り付けて使える設定が提供されます。クローンから最初の記憶までコマンド 1 つで到達できます:
+長期運用するバンクには、同梱の抽出器、外部ボリューム、ヘルスチェック付きのサービス群、バックアップ/ロールバックのしくみが必要です。Docker と、MCP 対応のコーディングエージェントが少なくとも 1 つ必要です — Claude Code、Codex、Gemini CLI はエンドツーエンドで接続済みで、それ以外のエージェントにはそのまま貼り付けて使える設定が提供されます。クローンから最初の記憶までコマンド 1 つで到達できます:
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git

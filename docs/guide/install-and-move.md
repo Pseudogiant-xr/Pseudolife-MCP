@@ -1,9 +1,11 @@
 # Install and move
 
 Use the [installer](../../README.md#durable-tier--docker-recommended-for-a-long-lived-bank) for a Docker bank:
-`ops/install.sh` on Linux/macOS or `ops/install.ps1` on Windows. For a lite
-bank without Docker, install `pip install 'pseudolife-mcp[lite]'` and follow
-the [lite quickstart](../../README.md#quickstart). To relocate an
+`ops/install.sh` on Linux/macOS or `ops/install.ps1` on Windows. The lite
+tier (a pip install with an embedded PostgreSQL bank) is retired: a machine
+that still holds a lite bank moves it first with
+[Move a lite bank to Docker](configuration.md#move-a-lite-bank-to-docker),
+because the installer refuses it until then. To relocate an
 existing Docker bank, use [`pseudolife-mcp move`](remote-bank.md#moving-a-bank)
 from its current host. Install the destination first and review `--dry-run`.
 Never hand-write or flatten a compose file to install or move a bank.

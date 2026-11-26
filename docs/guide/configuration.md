@@ -3817,9 +3817,9 @@ says why in one line in each of these cases:
 **What the native client refuses.** Each refusal names the way forward:
 
 - A lite-tier bank (`backup`, `restore`, `export`, `import`, `invite`,
-  `maintainer`, `lease`, `board-audit`): move the bank to the Docker tier
-  with the pip release (`pseudolife-mcp` 0.23.x), which still opens it,
-  following [Move a lite bank to Docker](#move-a-lite-bank-to-docker).
+  `maintainer`, `lease`, `board-audit`): the lite tier is retired, and the
+  one next step is to move the bank to the Docker tier with
+  [Move a lite bank to Docker](#move-a-lite-bank-to-docker).
 - `pseudolife-mcp serve`: it does not run the memory daemon, which is the
   Docker tier's `pseudolife-daemon`; start that with `docker compose -f
   ops/docker-compose.yml up -d`, or install the Docker tier first.
@@ -4614,9 +4614,14 @@ deletes files the tool itself wrote.
 
 ### Move a lite bank to Docker
 
-Run these steps with the pip release (`pseudolife-mcp` 0.23.x), which
-still opens a lite bank; the native client refuses one and points here
-([The native client](#the-native-client)).
+The lite tier is retired: the installer refuses a machine that still holds
+a lite bank, and the native client does not open one but points here
+([The native client](#the-native-client)). Run these steps with the pip
+release (`pseudolife-mcp` 0.23.x), which still opens a lite bank and is the
+last release whose test suite ran on one. If the machine no longer has it,
+install it into its own virtualenv with Python 3.10 or newer
+(`python -m pip install "pseudolife-mcp[lite]==0.23.1"`) and run step 2's
+`pseudolife-mcp` from that environment.
 
 An initialized lite bank is deliberately refused by the Docker installer. A
 backup alone does not clear that guard: preserve the stopped cluster before
