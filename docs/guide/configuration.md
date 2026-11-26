@@ -40,8 +40,10 @@ state volume (compose sets `PSEUDOLIFE_MCP_DATA_DIR=/data`; `docker exec
 pseudolife-mcp-daemon cat /data/config.yaml` shows it), read at startup, so
 a hand-edited value applies after the daemon restarts (`docker restart
 pseudolife-mcp-daemon`), while a `PSEUDOLIFE_MCP_TOKENS` change is an
-`ops/.env` change and needs the container recreated (`ops/update.*`, or
-`docker compose -f ops/docker-compose.yml up -d --no-deps pseudolife-daemon`).
+`ops/.env` change and needs the container recreated with the new bearer
+settings (`pseudolife-mcp update --reinstall --daemon-only --allow-auth-change
+--env-file <that ops/.env> --tag <the running version>`; a checkout uses
+`ops/update.*`).
 
 An `ops/.env` copied from a Windows host carries CRLF line endings. Compose
 reads such a file fine, but a value the shell installer read from it ended

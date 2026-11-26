@@ -233,7 +233,7 @@ impl<D: Docker> Bank<'_, D> {
                 ),
                 Absence::NoContainer => Stop(
                     format!(
-                        "the container {container} does not exist; start the Docker bank (docker compose up -d in its install directory) or name its containers with --container <postgres> --daemon-container <daemon>, then retry. Nothing was restored"
+                        "the container {container} does not exist; rerun the Docker tier's installer (ops/install.sh, or ops\\install.ps1 on Windows; it recreates the containers on the bank's existing volumes) or name its containers with --container <postgres> --daemon-container <daemon>, then retry. Nothing was restored"
                     ),
                     2,
                 ),
@@ -1103,6 +1103,13 @@ mod tests {
         let missing = bank.inspect("d").unwrap_err();
         assert!(
             missing.0.starts_with("the container d does not exist;"),
+            "{missing:?}"
+        );
+        // A Compose `up` from an install directory recreated the daemon on
+        // the base file's image, the retired Python daemon.
+        assert!(!missing.0.contains("docker compose"), "{missing:?}");
+        assert!(
+            missing.0.contains("rerun the Docker tier's installer"),
             "{missing:?}"
         );
         let down = bank.inspect("d").unwrap_err();

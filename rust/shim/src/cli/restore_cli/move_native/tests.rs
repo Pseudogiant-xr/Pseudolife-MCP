@@ -657,7 +657,7 @@ fn the_source_must_be_running_healthy_and_identified() {
             Box::new(|w| {
                 w.here.docs.remove("pseudolife-mcp-postgres");
             }),
-            "the source: the container pseudolife-mcp-postgres does not exist; start the Docker bank (docker compose up -d in its install directory), then retry",
+            "the source: the container pseudolife-mcp-postgres does not exist; rerun the Docker tier's installer (ops/install.sh, or ops\\install.ps1 on Windows; it recreates the containers on the bank's existing volumes), then retry",
         ),
     ];
     for (change, words) in cases {
