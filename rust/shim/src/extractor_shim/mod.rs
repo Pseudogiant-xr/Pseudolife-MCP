@@ -337,30 +337,34 @@ impl Shim {
                 )
             }
             ("POST", "/chat/completions" | "/v1/chat/completions") => {
-                let result = match completion_body
-                    .take()
-                    .expect("completion body")
-                    .collect()
-                    .await
-                {
-                    Ok(body) => {
-                        let raw = body.to_bytes();
-                        let text = String::from_utf8_lossy(&raw);
-                        match serde_json::from_slice(&raw) {
-                            Ok(v) => self.completion(v).await,
-                            Err(e) => Err(decode_error(&text, e)),
+                let result =
+                    match read_completion_body(completion_body.take().expect("completion body"))
+                        .await
+                    {
+                        BodyRead::Read(raw) => {
+                            let text = String::from_utf8_lossy(&raw);
+                            match serde_json::from_slice(&raw) {
+                                Ok(v) => self.completion(v).await.map_err(|e| (500, e)),
+                                Err(e) => Err((500, decode_error(&text, e))),
+                            }
                         }
-                    }
-                    Err(e) => Err(e.to_string()),
-                };
+                        BodyRead::TooLarge => Err((
+                            413,
+                            format!(
+                                "request body exceeds {MAX_COMPLETION_BODY} bytes; no chat \
+                                 completion request is that large"
+                            ),
+                        )),
+                        BodyRead::Failed(e) => Err((500, e)),
+                    };
                 match result {
                     Ok(v) => (200, v),
-                    Err(e) => {
+                    Err((status, e)) => {
                         cli::log(
                             &self.config,
                             &format!("{}_shim: request failed: {e}", self.config.kind.name()),
                         );
-                        (500, json!({"error":e}))
+                        (status, json!({"error":e}))
                     }
                 }
             }
@@ -374,6 +378,32 @@ impl Shim {
         Ok(response
             .body(Full::new(Bytes::from(body)))
             .expect("HTTP response"))
+    }
+}
+
+/// The largest chat completion body the shim reads. A dream batch is tens of
+/// KiB, and even a 1M-token context is about 4 MiB of JSON, so a larger body
+/// is refused with 413 instead of being buffered whole.
+const MAX_COMPLETION_BODY: usize = 16 * 1024 * 1024;
+
+enum BodyRead {
+    Read(Bytes),
+    TooLarge,
+    Failed(String),
+}
+
+async fn read_completion_body<B>(body: B) -> BodyRead
+where
+    B: hyper::body::Body<Data = Bytes>,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    match http_body_util::Limited::new(body, MAX_COMPLETION_BODY)
+        .collect()
+        .await
+    {
+        Ok(collected) => BodyRead::Read(collected.to_bytes()),
+        Err(e) if e.is::<http_body_util::LengthLimitError>() => BodyRead::TooLarge,
+        Err(e) => BodyRead::Failed(e.to_string()),
     }
 }
 
@@ -856,5 +886,56 @@ mod tests {
                 .windows(2)
                 .all(|a| a[1] - a[0] >= std::time::Duration::from_secs(30))
         );
+    }
+
+    #[tokio::test]
+    async fn completion_body_is_read_up_to_its_limit_and_no_further() {
+        let at_limit = Full::new(Bytes::from(vec![b' '; MAX_COMPLETION_BODY]));
+        assert!(matches!(
+            read_completion_body(at_limit).await,
+            BodyRead::Read(raw) if raw.len() == MAX_COMPLETION_BODY
+        ));
+        let over = Full::new(Bytes::from(vec![b' '; MAX_COMPLETION_BODY + 1]));
+        assert!(matches!(
+            read_completion_body(over).await,
+            BodyRead::TooLarge
+        ));
+    }
+
+    #[tokio::test]
+    async fn an_oversized_completion_request_gets_413() {
+        let shim = fixture_shim();
+        let (client, server) = tokio::io::duplex(64 * 1024);
+        let connection = tokio::spawn(async move { serve_connection(shim, server).await });
+        let (reader, mut writer) = tokio::io::split(client);
+        let mut reader = BufReader::new(reader);
+        let length = MAX_COMPLETION_BODY + 1;
+        // The server stops reading at the limit, so the writer runs apart
+        // from the reader and is dropped once the answer is in.
+        let sender = tokio::spawn(async move {
+            writer
+                .write_all(
+                    format!(
+                        "POST /v1/chat/completions HTTP/1.1\r\nHost: fixture\r\n\
+                         Content-Type: application/json\r\nContent-Length: {length}\r\n\r\n"
+                    )
+                    .as_bytes(),
+                )
+                .await?;
+            writer.write_all(&vec![b' '; length]).await
+        });
+        let body = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            response(&mut reader, 413),
+        )
+        .await
+        .unwrap();
+        let error = serde_json::from_slice::<Value>(&body).unwrap()["error"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(error.contains("request body exceeds"), "{error}");
+        sender.abort();
+        connection.abort();
     }
 }

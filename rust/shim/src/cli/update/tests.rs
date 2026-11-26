@@ -1251,6 +1251,32 @@ fn native_update_compose_requires_checksum_and_closed_archive() {
     assert!(release::verified_compose("0.21.0", &sums(&bytes), &bytes).is_err());
 }
 #[test]
+fn native_update_compose_refuses_an_archive_that_inflates_past_any_bundle() {
+    let files = [
+        ("docker-compose.yml", b"services: {}".as_slice()),
+        ("docker-compose.ghcr.yml", b"services: {}".as_slice()),
+        ("docker-compose.rust-daemon.yml", b"services: {}".as_slice()),
+        ("docker-compose.rust-shadow.yml", b"services: {}".as_slice()),
+        ("docker-compose.rust-ghcr.yml", b"services: {}".as_slice()),
+        ("Dockerfile.extractor", b"FROM scratch".as_slice()),
+    ];
+    // A second gzip member after the tar: only the drain inflates it, and
+    // its checksum matches, so only the unpacked-size bound can refuse it.
+    let mut bomb = archive(&files);
+    bomb.extend(gzip(&vec![0u8; 9 * 1024 * 1024]));
+    let error = release::verified_compose("0.21.0", &sums(&bomb), &bomb).unwrap_err();
+    assert!(error.to_string().contains("more than 8 MiB"), "{error}");
+    // The near miss: a small trailing member still verifies.
+    let mut small = archive(&files);
+    small.extend(gzip(&vec![0u8; 64 * 1024]));
+    assert_eq!(
+        release::verified_compose("0.21.0", &sums(&small), &small)
+            .unwrap()
+            .len(),
+        6
+    );
+}
+#[test]
 fn native_update_null_labels_and_failed_activation_are_distinct() {
     let temp = Temp::new();
     let accepted = temp.0.join(engine::SELECTION);

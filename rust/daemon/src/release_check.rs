@@ -12,6 +12,10 @@ use tokio::task::JoinHandle;
 const GITHUB_RELEASE: &str =
     "https://api.github.com/repos/Pseudogiant-xr/Pseudolife-MCP/releases/latest";
 const RETRY_AFTER_FAILURE_SECONDS: f64 = 900.0;
+/// GitHub's latest-release document for this repository is about 20 KiB
+/// (measured 27 November 2026, 0.25.x with its full asset list); a larger
+/// answer is not one and is not buffered.
+const MAX_RELEASE_BODY: usize = 1024 * 1024;
 
 #[derive(Clone, Default)]
 pub struct Snapshot {
@@ -259,10 +263,22 @@ where
     if response.status() != reqwest::StatusCode::OK {
         return FetchResult::default();
     }
-    let Ok(data) = response.json::<Value>().await else {
+    let Some(data) = capped_json(response, MAX_RELEASE_BODY).await else {
         return FetchResult::default();
     };
     release_metadata(&data)
+}
+
+/// The answer's JSON, or nothing when it fails, is not JSON or passes `limit`.
+async fn capped_json(mut response: reqwest::Response, limit: usize) -> Option<Value> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.ok()? {
+        if body.len() + chunk.len() > limit {
+            return None;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&body).ok()
 }
 
 fn unix_seconds() -> f64 {

@@ -37,6 +37,10 @@ pub const ALIAS_MODEL_NAMES: [&str; 2] = ["extractor", "bench"];
 const SERVED_MODEL_TTL: f64 = 300.0;
 /// `_AUTH_BODY_PEEK` (`memory/dream.py:1211`).
 const AUTH_BODY_PEEK: usize = 4096;
+/// The most of an extractor answer the daemon buffers. A chat completion of
+/// a few thousand tokens is tens of KiB and a provider's `/models` listing a
+/// few MiB; an endpoint that sends more is refused rather than held whole.
+const MAX_ANSWER_BODY: usize = 32 * 1024 * 1024;
 /// The only two speaker labels a claim may carry (`_SPEAKERS`).
 const SPEAKERS: [&str; 2] = ["user", "assistant"];
 
@@ -1367,6 +1371,25 @@ async fn peek_body(mut resp: reqwest::Response) -> Vec<u8> {
     out
 }
 
+/// A whole answer body, refused once it passes `limit` bytes.
+async fn capped_body(mut resp: reqwest::Response, limit: usize) -> Result<Vec<u8>, Raised> {
+    let mut out = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| transport_failure(&e, Phase::Body))?
+    {
+        if out.len() + chunk.len() > limit {
+            return Err(Raised::other(
+                "ValueError",
+                format!("the extractor's answer exceeds {limit} bytes"),
+            ));
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
+}
+
 // ---------------------------------------------------------------------------
 // The OpenAI-compatible extractor
 // ---------------------------------------------------------------------------
@@ -1559,11 +1582,7 @@ impl Compat {
                 || auth_words().is_match(&String::from_utf8_lossy(&peek));
             return Err(raised);
         }
-        let bytes = resp
-            .bytes()
-            .await
-            .map_err(|e| transport_failure(&e, Phase::Body))?;
-        Ok(bytes.to_vec())
+        capped_body(resp, MAX_ANSWER_BODY).await
     }
 
     /// The judge request body (`_judge_request`, `memory/dream.py:1752-1800`):
@@ -2171,11 +2190,7 @@ async fn get(url: &str, timeout: f64) -> Result<(u16, Vec<u8>), Raised> {
         .await
         .map_err(|e| transport_failure(&e, Phase::Send))?;
     let status = resp.status().as_u16();
-    let body = resp
-        .bytes()
-        .await
-        .map_err(|e| transport_failure(&e, Phase::Body))?;
-    Ok((status, body.to_vec()))
+    Ok((status, capped_body(resp, MAX_ANSWER_BODY).await?))
 }
 
 /// `probe_endpoint` (`memory/dream.py`): [`probe_endpoint_cause`] is
@@ -2524,6 +2539,26 @@ pub async fn status_extractor_fields(
 mod tests {
     use super::*;
     use std::io::{Read, Write};
+
+    #[tokio::test]
+    async fn answers_are_read_whole_up_to_the_cap_and_refused_past_it() {
+        let answer = |n: usize| reqwest::Response::from(axum::http::Response::new(vec![b'x'; n]));
+        assert_eq!(
+            capped_body(answer(1024), 1024).await.ok().map(|b| b.len()),
+            Some(1024)
+        );
+        let Err(refused) = capped_body(answer(1025), 1024).await else {
+            panic!("a body past the cap was read");
+        };
+        assert_eq!(refused.cause, Cause::Other("ValueError".into()));
+        assert!(
+            refused.text.contains("exceeds 1024 bytes"),
+            "{}",
+            refused.text
+        );
+        // The cap leaves room for any real answer, a large /models listing included.
+        const { assert!(MAX_ANSWER_BODY >= 16 * 1024 * 1024) };
+    }
 
     #[test]
     fn deeply_nested_replies_neither_recurse_unbounded_nor_read_as_expecting_value() {

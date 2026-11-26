@@ -35,6 +35,45 @@ fn test_is_loopback_url_is_keyed_on_the_host_only() {
 }
 
 #[test]
+fn test_a_bracketed_host_is_only_ever_the_whole_host() {
+    for value in [
+        "http://evil.example[::1]",
+        "http://evil.example[::1]:8765",
+        "http://[::1]evil.example:8765",
+        "http://[::1]:8765]",
+        "http://[[::1]]:8765",
+        "http://[::1]]",
+    ] {
+        assert_eq!(
+            daemon_url::validate(value),
+            Err(daemon_url::INVALID_URL_MESSAGE),
+            "{value}"
+        );
+        assert!(!daemon_url::is_loopback(value), "{value}");
+    }
+    // is_loopback reads values validate never saw: userinfo is no host.
+    for value in [
+        "http://[::1]@evil.example:8765",
+        "http://evil.example@[::1]:8765",
+        "http://127.0.0.1@evil.example",
+    ] {
+        assert!(!daemon_url::is_loopback(value), "{value}");
+    }
+    // The near misses: the legitimate spellings still validate and read.
+    for (value, loopback) in [
+        ("http://[::1]", true),
+        ("http://[::1]:8765", true),
+        ("https://[::1]:8765/", true),
+        ("http://[fe80::1%eth0]:8765", false),
+        ("http://[2001:db8::1]:8765", false),
+        ("http://example.com:8765", false),
+    ] {
+        let url = daemon_url::validate(value).unwrap_or_else(|e| panic!("{value}: {e}"));
+        assert_eq!(daemon_url::is_loopback(&url), loopback, "{value}");
+    }
+}
+
+#[test]
 fn test_daemon_origin_preserves_authority_spelling() {
     assert_eq!(
         daemon_url::validate("HTTP://LOCALHOST:80/").unwrap(),

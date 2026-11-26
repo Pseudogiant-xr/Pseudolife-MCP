@@ -97,6 +97,28 @@ fn every_corpus_pdf_reads_as_the_python_daemon_reads_it() {
     }
 }
 
+#[test]
+fn a_pdf_past_its_page_or_text_budget_is_refused_and_one_at_it_reads() {
+    let pdf = corpus("three-pages.pdf");
+    let whole = read(&pdf).expect("three-pages.pdf reads");
+    let at = |pages, text_bytes| extract_within(&pdf, Budget { pages, text_bytes });
+    // The near misses: exactly the document's pages and text still read.
+    assert_eq!(at(3, whole.len()), Ok(whole.clone()));
+    assert!(!whole.is_empty());
+    match at(2, whole.len()) {
+        Err(PdfError::Unreadable(why)) => {
+            assert!(why.contains("has 3 pages, more than the 2"), "{why}")
+        }
+        other => panic!("{other:?}"),
+    }
+    match at(3, whole.len() - 1) {
+        Err(PdfError::Unreadable(why)) => assert!(why.contains("text passes"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    // The shipped budget reads the corpus's 1,000-page hostile file.
+    const { assert!(BUDGET.pages >= 1_000 && BUDGET.text_bytes >= 64 * 1024 * 1024) };
+}
+
 /// A PDF with these objects (object 1 the catalog) and a correct xref.
 fn well_formed(objects: &[&[u8]]) -> Vec<u8> {
     let mut out = b"%PDF-1.7\n".to_vec();

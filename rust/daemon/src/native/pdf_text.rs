@@ -49,12 +49,34 @@ pub fn error_to_str(code: u64) -> String {
     }
 }
 
+/// What one read takes from a PDF. Pages can share one content stream and
+/// text can be compressed, so a file under the 64 MiB input cap can still
+/// expand far past it; a PDF past either bound is refused, not truncated.
+#[derive(Clone, Copy, Debug)]
+pub struct Budget {
+    pub pages: i32,
+    /// UTF-8 bytes of the joined text.
+    pub text_bytes: usize,
+}
+
+/// Ten times the corpus's 1,000-page hostile file, and the input cap's
+/// 64 MiB (`documents::MAX_DOCUMENT_BYTES`) for the text.
+pub const BUDGET: Budget = Budget {
+    pages: 10_000,
+    text_bytes: 64 * 1024 * 1024,
+};
+
 /// The bound library, bound once per process from a verified install; the
 /// lock also serializes every call (PDFium is not thread-safe).
 static BOUND: Mutex<Option<Box<dyn PdfiumLibraryBindings>>> = Mutex::new(None);
 
 /// The text of a PDF held in `data`, or why there is none.
 pub fn extract(data: &[u8]) -> Result<String, PdfError> {
+    extract_within(data, BUDGET)
+}
+
+/// [`extract`] under `budget`.
+pub fn extract_within(data: &[u8], budget: Budget) -> Result<String, PdfError> {
     let mut bound = BOUND.lock().unwrap_or_else(|p| p.into_inner());
     if bound.is_none() {
         let path = super::pdfium::library().map_err(PdfError::Unavailable)?;
@@ -64,7 +86,7 @@ pub fn extract(data: &[u8]) -> Result<String, PdfError> {
     // SAFETY: the bindings come from the pinned, hash-checked library and
     // are used only under BOUND's lock; every handle is opened and closed
     // within this call.
-    unsafe { text_of(bindings, data) }
+    unsafe { text_of(bindings, data, budget) }
 }
 
 fn bind(path: &Path) -> Result<Box<dyn PdfiumLibraryBindings>, String> {
@@ -93,7 +115,11 @@ fn bind(path: &Path) -> Result<Box<dyn PdfiumLibraryBindings>, String> {
 ///
 /// # Safety
 /// `b` must be initialized bindings used by one thread at a time.
-unsafe fn text_of(b: &dyn PdfiumLibraryBindings, data: &[u8]) -> Result<String, PdfError> {
+unsafe fn text_of(
+    b: &dyn PdfiumLibraryBindings,
+    data: &[u8],
+    budget: Budget,
+) -> Result<String, PdfError> {
     let unreadable = |m: &str| PdfError::Unreadable(m.to_string());
     unsafe {
         let doc = b.FPDF_LoadMemDocument64(data, None);
@@ -112,17 +138,28 @@ unsafe fn text_of(b: &dyn PdfiumLibraryBindings, data: &[u8]) -> Result<String, 
                 error_to_str(code)
             )));
         }
-        let result = pages(b, doc);
+        let result = pages(b, doc, budget);
         b.FPDF_CloseDocument(doc);
         result
     }
 }
 
 /// `"\n\n".join(page text for page in pdf)`.
-unsafe fn pages(b: &dyn PdfiumLibraryBindings, doc: FPDF_DOCUMENT) -> Result<String, PdfError> {
+unsafe fn pages(
+    b: &dyn PdfiumLibraryBindings,
+    doc: FPDF_DOCUMENT,
+    budget: Budget,
+) -> Result<String, PdfError> {
     let mut texts = Vec::new();
+    let mut joined = 0usize;
     unsafe {
         let mut n_pages = b.FPDF_GetPageCount(doc);
+        if n_pages > budget.pages {
+            return Err(PdfError::Unreadable(format!(
+                "the PDF has {n_pages} pages, more than the {} one ingest reads; split it into smaller files",
+                budget.pages
+            )));
+        }
         if crate::mutants::active("document-pdf-first-page-only") {
             n_pages = n_pages.min(1);
         }
@@ -136,10 +173,17 @@ unsafe fn pages(b: &dyn PdfiumLibraryBindings, doc: FPDF_DOCUMENT) -> Result<Str
                 b.FPDF_ClosePage(page);
                 return Err(PdfError::Unreadable("Failed to load text page.".into()));
             }
-            let text = text_range(b, text_page);
+            let separator = if texts.is_empty() { 0 } else { 2 };
+            let remaining = budget.text_bytes.saturating_sub(joined + separator);
+            let text = text_range(b, text_page, remaining, budget.text_bytes);
             b.FPDFText_ClosePage(text_page);
             b.FPDF_ClosePage(page);
-            texts.push(text?);
+            let text = text?;
+            joined += text.len() + separator;
+            if joined > budget.text_bytes {
+                return Err(text_budget_passed(budget.text_bytes));
+            }
+            texts.push(text);
         }
     }
     if crate::mutants::active("document-pdf-pages-one-newline") {
@@ -148,9 +192,22 @@ unsafe fn pages(b: &dyn PdfiumLibraryBindings, doc: FPDF_DOCUMENT) -> Result<Str
     Ok(texts.join("\n\n"))
 }
 
+fn text_budget_passed(text_bytes: usize) -> PdfError {
+    PdfError::Unreadable(format!(
+        "the PDF's text passes {text_bytes} bytes, more than one ingest reads; split it into smaller files"
+    ))
+}
+
 /// `PdfTextPage.get_text_range()` with its defaults (`index=0, count=-1,
-/// errors="ignore"`).
-unsafe fn text_range(b: &dyn PdfiumLibraryBindings, tp: FPDF_TEXTPAGE) -> Result<String, PdfError> {
+/// errors="ignore"`). A page whose text could not fit in the `remaining`
+/// bytes of the budget is refused before its buffer is allocated: every
+/// UTF-16 unit kept decodes to at least one UTF-8 byte.
+unsafe fn text_range(
+    b: &dyn PdfiumLibraryBindings,
+    tp: FPDF_TEXTPAGE,
+    remaining: usize,
+    text_bytes: usize,
+) -> Result<String, PdfError> {
     unsafe {
         let n_chars = b.FPDFText_CountChars(tp);
         if n_chars == -1 {
@@ -188,6 +245,9 @@ unsafe fn text_range(b: &dyn PdfiumLibraryBindings, tp: FPDF_TEXTPAGE) -> Result
         // (`count + 1` UTF-16 units), so no PDFium build can write past it.
         let in_count = usize::try_from(t_end + 2 - t_start).unwrap_or(0);
         let contract = usize::try_from(count).unwrap_or(0) + 1;
+        if contract - 1 > remaining {
+            return Err(text_budget_passed(text_bytes));
+        }
         let mut buffer = vec![0u16; in_count.max(contract)];
         let out_count =
             usize::try_from(b.FPDFText_GetText(tp, index, count, buffer.as_mut_ptr())).unwrap_or(0);

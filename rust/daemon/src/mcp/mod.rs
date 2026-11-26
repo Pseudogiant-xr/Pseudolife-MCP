@@ -318,10 +318,18 @@ fn security(state: &McpState, method: &Method, h: &HeaderMap) -> Option<Response
     if state.auth_configured {
         return None;
     }
+    // `<base>:<port>` and nothing after the port, so a value such as
+    // `localhost:1.evil.example` or `127.0.0.1:1@evil.example` is refused.
+    let with_port = |value: &str, base: &str| {
+        value
+            .strip_prefix(base)
+            .and_then(|rest| rest.strip_prefix(':'))
+            .is_some_and(|port| !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()))
+    };
     let host_ok = latin1(h, "host").is_some_and(|host| {
         ["127.0.0.1", "localhost", "[::1]"]
             .iter()
-            .any(|base| host.starts_with(&format!("{base}:")))
+            .any(|base| with_port(&host, base))
             || (crate::mutants::active("mcp-bare-host") && host == "127.0.0.1")
     });
     if !host_ok {
@@ -330,7 +338,7 @@ fn security(state: &McpState, method: &Method, h: &HeaderMap) -> Option<Response
     if let Some(origin) = latin1(h, "origin").filter(|o| !o.is_empty()) {
         let ok = ["http://127.0.0.1", "http://localhost", "http://[::1]"]
             .iter()
-            .any(|base| origin.starts_with(&format!("{base}:")));
+            .any(|base| with_port(&origin, base));
         if !ok && !crate::mutants::active("mcp-any-origin") {
             return Some(plain(403, "Invalid Origin header"));
         }
