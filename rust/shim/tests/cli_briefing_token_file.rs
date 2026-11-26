@@ -174,11 +174,7 @@ fn briefing_with_a_missing_token_file_sends_no_payload_request() {
 fn session_start_hook_sends_the_token_file_bearer() {
     // The settings.json hook a client-only install without the plugin runs.
     let home = DisposableHome::new();
-    let token = home.private_token(
-        "client.token",
-        b"file-secret
-",
-    );
+    let token = home.private_token("client.token", b"file-secret\n");
     let (output, requests) = briefing(
         &home.0,
         &["briefing", "--hook-json"],
@@ -194,11 +190,9 @@ fn session_start_hook_sends_the_token_file_bearer() {
     assert_eq!(requests.len(), 2, "{requests:?}");
     assert!(requests[1].starts_with("GET /api/hook/session-start"));
     assert!(
-        requests[1].to_ascii_lowercase().contains(
-            "
-authorization: bearer file-secret
-"
-        ),
+        requests[1]
+            .to_ascii_lowercase()
+            .contains("\r\nauthorization: bearer file-secret\r\n"),
         "{requests:?}"
     );
 }
