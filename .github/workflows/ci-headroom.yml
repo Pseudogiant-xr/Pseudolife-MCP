@@ -3,7 +3,7 @@
 # last two days, every attempt of every job, and compares each with the bounds on
 # master: the job's timeout-minutes, and ops/ci_tests.sh's pytest bound for
 # the selection that run used (from its test-diagnostics artifact). A run
-# above 80% of a bound is listed in one issue, which keeps each near miss
+# at 80% or more of a bound is listed in one issue, which keeps each near miss
 # for 14 days or until its bound is raised and closes itself when none is
 # left. On 26 November 2026 the 0.26.0 cut batch lost three attempts to a
 # bound a run had already come within a minute of on 25 November.
@@ -11,7 +11,8 @@
 # The run is red only when the check itself cannot run; a near miss is the
 # issue, never a red run, because nothing reads a red scheduled run.
 # Not a pull-request workflow, so it takes no slot from a batch: one
-# ubuntu-latest job of about 2 minutes a day, about 150 API calls.
+# ubuntu-latest job of about 2 minutes a day and about 220 API calls (two
+# days of runs; rust/ci/ci_headroom.py SYNC_DAYS says how that was counted).
 name: CI headroom
 
 on:
@@ -22,7 +23,7 @@ on:
   workflow_dispatch:
     inputs:
       days:
-        description: Read the runs created in the last N days (1 to 14)
+        description: Read the runs created in the last N days (1 to 3)
         default: "2"
         type: string
 

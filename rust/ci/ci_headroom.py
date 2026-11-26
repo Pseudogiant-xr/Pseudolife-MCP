@@ -64,8 +64,17 @@ CI_TESTS = ROOT / "ops/ci_tests.sh"
 THRESHOLD = 0.8
 # The test-diagnostics artifact's retention-days in ci.yml.
 RETENTION_DAYS = 14
-# The runs the issue keeps for each bound, worst first.
+# The runs the issue keeps for each bound, worst first, and the bounds it
+# lists, worst first: a row and its state take about 870 bytes, and an issue
+# body holds 65,536 characters.
 PER_BOUND = 5
+MAX_BOUNDS = 12
+# sync's longest look back. A day needs about 110 API calls, estimated from
+# W127's 2026-11-12..26 survey: about 85 runs a day outlast too_short()
+# (about 70 of rust.yml, 15 of ci.yml, none of python-freeze.yml), one jobs
+# listing each, plus run listings and about 10 test-diagnostics reads.
+# GITHUB_TOKEN allows 1000 calls an hour for the whole repository.
+SYNC_DAYS = 3
 DIAGNOSTICS = "test-diagnostics"
 TITLE = "CI: a hosted job is close to its time limit"
 AUTHOR = "github-actions[bot]"
@@ -158,8 +167,10 @@ class RunEvaluator(ci_budget.Evaluator):
 def scope_full(run: dict) -> str:
     """rust.yml's scope output ``full`` (rust/ci/docs_scope.py rust_scope):
     'false' for a pull request from any branch but integrate/*, 'true' for
-    every other run. Its error path says 'true' for such a pull request too,
-    which only a run whose scope crashed sees."""
+    every other run. Its error path and an empty diff say 'true' for such a
+    pull request too; only a run whose scope crashed, or whose pull request
+    changes nothing, sees that, and there the 100-minute bound read here is
+    25 minutes too generous."""
     branch = run.get("head_branch") or ""
     ordinary = run.get("event") == "pull_request" and branch and not branch.startswith("integrate/")
     return "false" if ordinary else "true"
@@ -295,9 +306,11 @@ class Reading:
     findings: list[Finding] = field(default_factory=list)
     unplaced: dict[str, int] = field(default_factory=dict)
     unresolved: dict[str, str] = field(default_factory=dict)
+    unreadable: dict[str, str] = field(default_factory=dict)
     runs: int = 0
     jobs: int = 0
     forks: int = 0
+    short: int = 0
 
 
 class Bounds:
@@ -408,7 +421,7 @@ def merge(bounds: Bounds, previous: list[Finding], current: list[Finding], now: 
     ranked = [sorted(found, key=lambda finding: (finding.share, finding.completed_at), reverse=True)[:PER_BOUND]
               for found in groups.values()]
     ranked.sort(key=lambda found: (found[0].share, found[0].job), reverse=True)
-    return [finding for found in ranked for finding in found]
+    return [finding for found in ranked[:MAX_BOUNDS] for finding in found]
 
 
 # --- The issue -----------------------------------------------------------------
@@ -429,7 +442,8 @@ def parse_state(body: str) -> list[Finding]:
     except ValueError:
         return []
     found = []
-    for item in document.get("findings", []) if isinstance(document, dict) else []:
+    items = document.get("findings") if isinstance(document, dict) else None
+    for item in items if isinstance(items, list) else []:
         if not isinstance(item, dict) or set(item) != set(FIELDS):
             continue
         typed = all(type(item[name]) is kind if kind is not float
@@ -438,7 +452,9 @@ def parse_state(body: str) -> list[Finding]:
             continue
         values = {name: float(item[name]) if kind is float else item[name] for name, kind in FIELDS.items()}
         try:
-            parse_time(values["completed_at"])
+            # merge() compares it with an aware time: a naive one is malformed.
+            if parse_time(values["completed_at"]).tzinfo is None:
+                continue
         except ValueError:
             continue
         if (values["kind"] not in ("job", "pytest") or not 0 < values["minutes"] < 10_000
@@ -489,24 +505,56 @@ def render(findings: list[Finding], now: datetime) -> str:
     ])
 
 
+class GitHubError(RuntimeError):
+    """A gh call failed; the message carries gh's own words (a rate limit,
+    a 404, a missing login)."""
+
+
 class GitHub:
     """The calls this check makes, through the gh CLI."""
+
+    @staticmethod
+    def call(command: list[str], *, data: bytes | None = None) -> bytes:
+        done = subprocess.run(command, input=data, capture_output=True)
+        if done.returncode != 0:
+            said = done.stderr.decode("utf-8", "replace").strip() or f"exit {done.returncode}"
+            raise GitHubError(f"{' '.join(command[:4])} failed: {said}")
+        return done.stdout
 
     def json(self, path: str, *, method: str = "GET", fields: dict | None = None):
         command = ["gh", "api", "-X", method, path]
         if fields is not None:
             command += ["--input", "-"]
-        out = subprocess.run(command, input=json.dumps(fields) if fields is not None else None,
-                             check=True, capture_output=True, text=True).stdout
+        out = self.call(command, data=json.dumps(fields).encode() if fields is not None else None)
         return json.loads(out) if out.strip() else None
 
     def pages(self, path: str, key: str) -> list[dict]:
-        out = subprocess.run(["gh", "api", "--paginate", path, "--jq", f".{key}[]"],
-                             check=True, capture_output=True, text=True).stdout
+        out = self.call(["gh", "api", "--paginate", path, "--jq", f".{key}[]"]).decode("utf-8")
         return [json.loads(line) for line in out.splitlines() if line.strip()]
 
     def bytes(self, path: str) -> bytes:
-        return subprocess.run(["gh", "api", path], check=True, capture_output=True).stdout
+        return self.call(["gh", "api", path])
+
+
+def shortest_bound(bounds: Bounds, workflow: str, run: dict) -> float | None:
+    """The smallest bound any job of this workflow has for this run."""
+    found = [job_bound(workflow, shape, combo, run)[0]
+             for shape in bounds.shapes.get(workflow, [])
+             for combo in (list(shape.combos.values()) or [None])]
+    found = [bound for bound in found if bound is not None]
+    return min(found) if found else None
+
+
+def too_short(bounds: Bounds, workflow: str, run: dict) -> bool:
+    """A first attempt that ran for less than THRESHOLD of the workflow's
+    smallest bound holds no finding: no job of it ran longer than the run.
+    (A later attempt's run times leave out the earlier attempts' jobs.) It
+    saves most calls: on 2026-11-12..26, 711 of 917 ci.yml runs, every
+    python-freeze.yml run and 35 of 1000 rust.yml runs."""
+    if run.get("run_attempt") != 1 or not run.get("run_started_at") or not run.get("updated_at"):
+        return False
+    smallest = shortest_bound(bounds, workflow, run)
+    return smallest is not None and minutes_between(run["run_started_at"], run["updated_at"]) < THRESHOLD * smallest
 
 
 def read_runs(github, bounds: Bounds, since: datetime) -> Reading:
@@ -522,6 +570,9 @@ def read_runs(github, bounds: Bounds, since: datetime) -> Reading:
             if (run.get("head_repository") or {}).get("full_name") != REPOSITORY:
                 reading.forks += 1
                 continue
+            if too_short(bounds, workflow, run):
+                reading.short += 1
+                continue
             jobs = github.pages(f"repos/{REPOSITORY}/actions/runs/{run['id']}/jobs?filter=all&per_page=100", "jobs")
             cache: dict = {}
 
@@ -532,7 +583,12 @@ def read_runs(github, bounds: Bounds, since: datetime) -> Reading:
                 artifact = artifact_for(job, cache["artifacts"])
                 if artifact is None or int(artifact.get("size_in_bytes") or 0) > ARTIFACT_BYTES:
                     return None
-                members = read_members(github.bytes(f"repos/{REPOSITORY}/actions/artifacts/{artifact['id']}/zip"))
+                # One unreadable artifact costs its pytest reading, not the pass.
+                try:
+                    members = read_members(github.bytes(f"repos/{REPOSITORY}/actions/artifacts/{artifact['id']}/zip"))
+                except (GitHubError, zipfile.BadZipFile) as error:
+                    reading.unreadable[f"{run['id']}/{job['id']}"] = str(error)[:200]
+                    return None
                 return members.get("cpu.txt", ""), members.get("process.txt", "")
 
             examine(bounds, workflow, run, jobs, diagnostics, reading)
@@ -572,8 +628,9 @@ def sync(github, bounds: Bounds, current: list[Finding], now: datetime) -> str:
 # --- Command line --------------------------------------------------------------
 
 def summary(reading: Reading) -> str:
-    lines = [f"read {reading.runs} runs, {reading.jobs} job attempts ({reading.forks} fork runs left unread); "
-             f"{len(reading.findings)} above {THRESHOLD:.0%} of a bound"]
+    lines = [f"read {reading.runs} runs, {reading.jobs} job attempts ({reading.forks} fork runs left unread, "
+             f"{reading.short} runs too short to near a bound); "
+             f"{len(reading.findings)} at {THRESHOLD:.0%} or more of a bound"]
     for finding in sorted(reading.findings, key=lambda finding: -finding.share):
         what = "job" if finding.kind == "job" else f"pytest {finding.selection}"
         lines.append(f"  {finding.share:6.1%}  {finding.workflow}: {finding.job} [{what}] run {finding.run_id} "
@@ -584,6 +641,8 @@ def summary(reading: Reading) -> str:
                      + ", ".join(f"{name} x{count}" for name, count in sorted(reading.unplaced.items())))
     for name, note in sorted(reading.unresolved.items()):
         lines.append(f"no bound for {name}: {note}")
+    for name, error in sorted(reading.unreadable.items()):
+        lines.append(f"diagnostics artifact of run/job {name} unreadable: {error}")
     return "\n".join(lines)
 
 
@@ -596,6 +655,10 @@ def main(argv: list[str] | None = None) -> int:
     options = parser.parse_args(argv)
     if not 1 <= options.days <= RETENTION_DAYS:
         parser.error(f"--days must be between 1 and {RETENTION_DAYS}")
+    if options.command == "sync" and options.days > SYNC_DAYS:
+        parser.error(f"sync reads at most {SYNC_DAYS} days: the workflow's token has 1000 API calls an hour, "
+                     "shared with every other workflow of the repository; read further back with "
+                     f"`report --days {options.days}` under your own login")
     now = datetime.now(timezone.utc)
     bounds = Bounds.from_checkout()
     github = GitHub()

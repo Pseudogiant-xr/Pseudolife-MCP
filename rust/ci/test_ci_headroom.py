@@ -333,6 +333,74 @@ def test_an_oversized_artifact_is_not_downloaded(monkeypatch):
     assert [f for f in reading.findings if f.kind == "pytest"] == []
 
 
+def test_a_first_attempt_too_short_to_near_a_bound_is_not_listed():
+    # Run 45533353153 took about an hour; the smallest rust.yml bound in
+    # these fixtures is Scope's 5 minutes, so 3 minutes is under 80% of it.
+    checked = bounds()
+    run = dict(next(run for run in runs("rust.yml") if run["id"] == 45533353153),
+               run_started_at="2026-11-25T02:29:52Z")
+    assert ci_headroom.shortest_bound(checked, "rust.yml", run) == 5.0
+    assert ci_headroom.too_short(checked, "rust.yml", dict(run, updated_at="2026-11-25T02:32:51Z"))
+    assert not ci_headroom.too_short(checked, "rust.yml", dict(run, updated_at="2026-11-25T02:33:53Z"))
+    # A later attempt's times leave out the earlier attempts' jobs.
+    assert not ci_headroom.too_short(checked, "rust.yml", dict(run, updated_at="2026-11-25T02:30:00Z", run_attempt=2))
+    assert not ci_headroom.too_short(checked, "rust.yml", {"run_attempt": 1, "event": "push"})
+
+
+def test_a_short_run_costs_no_jobs_call(monkeypatch):
+    short = copy.deepcopy(FIXTURES)
+    for run in short["runs"]:
+        run.update(run_started_at=run["created_at"], updated_at=run["created_at"], run_attempt=1)
+    monkeypatch.setitem(globals(), "FIXTURES", short)
+    github = Recorded()
+    reading = ci_headroom.read_runs(github, bounds(), NOW)
+    assert reading.findings == [] and reading.short == len(runs())
+    assert not any("/jobs?" in call for call in github.calls)
+
+
+def test_an_unreadable_artifact_costs_its_reading_not_the_pass(monkeypatch):
+    class Broken(Recorded):
+        def bytes(self, path):
+            raise ci_headroom.GitHubError("gh api repos/x failed: HTTP 410: artifact expired")
+    reading = ci_headroom.read_runs(Broken(), bounds(ONE_BOUND), NOW)
+    assert [f for f in reading.findings if f.kind == "pytest"] == []
+    assert len(reading.unreadable) == 5
+    assert "HTTP 410: artifact expired" in ci_headroom.summary(reading)
+    assert table(reading) == [row for row in table(read(bounds(ONE_BOUND))) if row[2] == "job"]
+
+
+def test_a_failed_gh_call_names_gh_s_own_reason(monkeypatch):
+    class Done:
+        returncode, stdout, stderr = 1, b"", b"HTTP 403: API rate limit exceeded for installation\n"
+    monkeypatch.setattr(ci_headroom.subprocess, "run", lambda *args, **kwargs: Done())
+    with pytest.raises(ci_headroom.GitHubError, match="API rate limit exceeded"):
+        ci_headroom.GitHub().pages("repos/x/actions/runs", "workflow_runs")
+
+
+def test_the_issue_lists_at_most_its_worst_bounds():
+    finding = current()[0]
+    many = [Finding(**{**finding.__dict__, "job": f"job {n:02d}", "minutes": finding.bound * (0.8 + n / 200)})
+            for n in range(ci_headroom.MAX_BOUNDS + 3)]
+    rust = copy.deepcopy(RUST)
+    for n in range(ci_headroom.MAX_BOUNDS + 3):
+        rust["jobs"][f"j{n}"] = {"name": f"job {n:02d}", "timeout-minutes": finding.bound, "steps": [{"run": "true"}]}
+    ci = copy.deepcopy(CI)
+    ci["jobs"].update(rust["jobs"])
+    kept = ci_headroom.merge(bounds(ci=ci), [], many, NOW)
+    assert [f.job for f in kept] == [f"job {n:02d}" for n in range(ci_headroom.MAX_BOUNDS + 2, 2, -1)]
+    assert len(ci_headroom.render(kept, NOW)) < 65_536
+
+
+def test_sync_reads_at_most_its_days(monkeypatch):
+    class Offline:
+        def __init__(self):
+            raise AssertionError("a refused sync reached GitHub")
+    monkeypatch.setattr(ci_headroom, "GitHub", Offline)
+    with pytest.raises(SystemExit) as refused:
+        ci_headroom.main(["sync", "--days", str(ci_headroom.SYNC_DAYS + 1)])
+    assert refused.value.code == 2
+
+
 def test_a_forks_runs_are_never_read():
     # A fork's run carries its own workflow's job names and its branch's
     # artifacts: none of it reaches the issue.
@@ -407,6 +475,9 @@ def test_each_bound_keeps_its_worst_runs():
     "", "no state", "<!-- ci-headroom-state {not json} -->",
     '<!-- ci-headroom-state {"findings": [{"workflow": "ci.yml"}]} -->',
     '<!-- ci-headroom-state {"findings": "x"} -->',
+    '<!-- ci-headroom-state {"findings": 5} -->',
+    '<!-- ci-headroom-state {"findings": null} -->',
+    '<!-- ci-headroom-state [1, 2] -->',
 ])
 def test_a_malformed_state_is_ignored(body):
     assert ci_headroom.parse_state(body) == []
@@ -417,8 +488,11 @@ def test_a_state_field_of_the_wrong_type_drops_that_finding():
     state = json.loads(ci_headroom.STATE.search(ci_headroom.render(good, NOW)).group(1))
     state["findings"][0]["killed"] = "false"
     state["findings"][1]["minutes"] = -1
+    # A time without a zone would fail merge()'s comparison every day.
+    state["findings"][2]["completed_at"] = "2026-11-26"
     body = f"<!-- ci-headroom-state {json.dumps(state)} -->"
-    assert ci_headroom.parse_state(body) == good[2:]
+    assert ci_headroom.parse_state(body) == good[3:]
+    ci_headroom.merge(bounds(), ci_headroom.parse_state(body), [], NOW)
 
 
 def test_a_job_name_cannot_end_the_state_comment():
