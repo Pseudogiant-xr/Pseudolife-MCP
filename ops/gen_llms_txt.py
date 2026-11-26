@@ -32,7 +32,7 @@ SUMMARY = (
 # index.
 PAGES: list[tuple[str, str]] = [
     ("docs/guide/install-and-move.md",
-     "Installer and lite pip setup, pseudolife-mcp move, and the supported "
+     "Installer setup, moving a retired lite bank, pseudolife-mcp move, and the supported "
      "compose file for external stack managers; never hand-write a compose file"),
     ("README.md",
      "Overview, quickstart, tool reference, and operations — start here"),

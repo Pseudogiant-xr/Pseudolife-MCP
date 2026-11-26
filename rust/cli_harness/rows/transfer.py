@@ -484,11 +484,12 @@ _NO_DATABASE = "no database configured — set PSEUDOLIFE_MCP_DATABASE_URL"
 # bank with rust/shim/src/cli/retired.rs `lite_bank_refusal`, after import's
 # own "import refused: " prefix. The data dir is the case's {HOME}<sep>lite.
 LITE_REFUSAL = (
-    "import refused: {HOME}" + _SEP + "lite holds a lite-tier bank (embedded PostgreSQL), "
-    "and the lite tier is retired, so this client does not open it. Move the bank to the "
-    "Docker tier with the pip release (pseudolife-mcp 0.23.x), which still opens it: "
-    "follow \"Move a lite bank to Docker\" in docs/guide/configuration.md, which backs "
-    "the stopped bank up first and then has you install the Docker tier with "
+    "import refused: {HOME}" + _SEP + "lite holds a lite-tier bank (embedded PostgreSQL). "
+    "The lite tier is retired, so this client does not open it. Next step: move the bank "
+    "to the Docker tier with \"Move a lite bank to Docker\" (https://github.com/"
+    "Pseudogiant-xr/Pseudolife-MCP/blob/master/docs/guide/configuration.md"
+    "#move-a-lite-bank-to-docker), which backs the stopped bank up with the pip release "
+    "that still opens it and then has you install the Docker tier with "
     "ops/install.sh (Linux, macOS) or ops\\install.ps1 (Windows).")
 # Host-independent: an oracle with pg0 refuses the unreadable marker with a
 # traceback, one without pg0 never attaches and prints the no-database
