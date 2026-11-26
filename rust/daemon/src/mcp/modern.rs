@@ -35,6 +35,20 @@ fn error(id: &Value, code: i64, message: &str, data: Option<Value>) -> Value {
     }
 }
 
+/// A request task's answer. A task that panicked (a bug elsewhere: tool
+/// calls are already guarded) answers the JSON-RPC internal error for its
+/// request instead of dropping the connection; an aborted one, which only
+/// happens once its client is gone, answers the same.
+fn joined(id: &Value, done: Result<Value, tokio::task::JoinError>) -> Value {
+    match done {
+        Ok(value) => value,
+        Err(failed) => {
+            eprintln!("MCP request task failed: {failed}");
+            error(id, -32603, "Internal server error", None)
+        }
+    }
+}
+
 fn response(value: Value) -> Response {
     let status = match value
         .get("error")
@@ -402,6 +416,7 @@ pub(super) async fn handle(
     // anyio worker threads; only the HTTP response stops being delivered.
     let interruptible = method != "tools/call"
         || params.get("name").and_then(Value::as_str) == Some("memory_toolset");
+    let request_id = id.clone();
     let mut work = tokio::spawn(dispatch(
         app.clone(),
         principal.to_string(),
@@ -412,7 +427,7 @@ pub(super) async fn handle(
     ));
     let abort = AbortAsync(interruptible.then(|| work.abort_handle()));
     tokio::select! {
-        done = &mut work => response(done.expect("request task")),
+        done = &mut work => response(joined(&request_id, done)),
         _ = tokio::time::sleep(PING_EVERY) => {
             let stream = async_stream(move |tx| async move {
                 let _abort = abort;
@@ -420,7 +435,8 @@ pub(super) async fn handle(
                 loop {
                     tokio::select! {
                         done = &mut work => {
-                            if let Ok(value) = done { let _ = tx.send(Ok(sse_event(&wire(&value)))).await; }
+                            let value = joined(&request_id, done);
+                            let _ = tx.send(Ok(sse_event(&wire(&value)))).await;
                             break;
                         },
                         _ = tx.closed() => break,
@@ -562,6 +578,22 @@ impl Drop for SubscriptionGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_panicked_request_task_answers_an_internal_error() {
+        async fn panics() -> Value {
+            panic!("fixture panic in a request task")
+        }
+        let failed = tokio::spawn(panics()).await;
+        let answer = joined(&json!(7), failed);
+        assert_eq!(answer["id"], 7);
+        assert_eq!(answer["error"]["code"], -32603);
+        let ok = joined(
+            &json!(8),
+            Ok(json!({"jsonrpc": "2.0", "id": 8, "result": {}})),
+        );
+        assert_eq!(ok["result"], json!({}));
+    }
 
     #[tokio::test]
     async fn dropped_response_aborts_async_work() {

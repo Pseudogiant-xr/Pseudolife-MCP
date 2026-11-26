@@ -505,9 +505,12 @@ impl SessionSnapshot {
 
     /// `drop_key`: a key just revoked; its passkey sessions and the key
     /// leave the view at once.
+    /// The key's sessions and the key itself leave the view under one lock,
+    /// so no lookup sees the key gone while one of its sessions still
+    /// authenticates.
     pub fn drop_key(&self, credential_id: &str) {
-        self.drop_issuer(credential_id, None);
         let mut s = self.lock();
+        Self::drop_issuer_locked(&mut s, credential_id, None);
         s.seq += 1;
         let seq = s.seq;
         s.keys_dropped.insert(credential_id.to_string(), seq);
@@ -518,8 +521,11 @@ impl SessionSnapshot {
     /// `drop_issuer`: a key's passkey sessions just revoked, all of them or
     /// all but those signed in as `keep_principal` (a rebind).
     pub fn drop_issuer(&self, issuer: &str, keep_principal: Option<&str>) {
-        let ids: Vec<String> = self
-            .lock()
+        Self::drop_issuer_locked(&mut self.lock(), issuer, keep_principal);
+    }
+
+    fn drop_issuer_locked(s: &mut Inner, issuer: &str, keep_principal: Option<&str>) {
+        let ids: Vec<String> = s
             .by_hash
             .values()
             .filter(|row| {
@@ -529,15 +535,18 @@ impl SessionSnapshot {
             })
             .map(|row| row.session_id.clone())
             .collect();
-        self.drop_ids(&ids);
+        Self::drop_ids_locked(s, &ids);
     }
 
     /// Revocations that just committed: gone at once (`drop`).
     pub fn drop_ids(&self, ids: &[String]) {
+        Self::drop_ids_locked(&mut self.lock(), ids);
+    }
+
+    fn drop_ids_locked(s: &mut Inner, ids: &[String]) {
         if ids.is_empty() {
             return;
         }
-        let mut s = self.lock();
         s.seq += 1;
         let seq = s.seq;
         for sid in ids {

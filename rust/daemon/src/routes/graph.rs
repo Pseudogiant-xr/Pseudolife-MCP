@@ -379,12 +379,12 @@ async fn rejudge(
     actions::in_txn(ready.storage.client(), |c| async move {
         bounded_requeue(q, limit, |kind, left| async move {
             let count=if kind=="candidate" {
-                let mut memo=meta(c,"deep_candidate_verdicts").await?;
+                let mut memo=object_memo(meta(c,"deep_candidate_verdicts").await?);
                 let mut pairs=memo.get("pairs").and_then(Value::as_object).cloned().unwrap_or_default();
                 let mut keys=pairs.keys().cloned().collect::<Vec<_>>();keys.sort();keys.truncate(left as usize);
                 for key in &keys {pairs.remove(key);}
                 memo["pairs"]=json!(pairs); set_meta(c,"deep_candidate_verdicts",&memo).await?;
-                let mut done=meta(c,"deep_candidates_judged").await?;
+                let mut done=object_memo(meta(c,"deep_candidates_judged").await?);
                 done["complete"]=json!(false);set_meta(c,"deep_candidates_judged",&done).await?;
                 keys.len() as i64
             } else if kind=="curation" {
@@ -405,7 +405,7 @@ async fn rejudge(
                     c.query("SELECT id FROM entity_proposals WHERE status='pending' AND kind=$1 AND judge_verdict IS NOT NULL AND judge_verdict<>'' ORDER BY kind, score DESC NULLS LAST,id LIMIT $2",&[&kind,&left]).await
                 }.map_err(internal)?;
                 let key=format!("review_judgments_v1_{kind}");
-                let mut memo=meta(c,&key).await?;
+                let mut memo=object_memo(meta(c,&key).await?);
                 for row in &rows {
                     let id:i64=row.get(0);
                     let sql=if kind=="link" {
@@ -414,7 +414,7 @@ async fn rejudge(
                         "UPDATE entity_proposals SET judge_verdict=NULL,judge_confidence=NULL,judge_note=NULL,judge_model=NULL,judged_at=NULL,judge_served_model=NULL,judge2_verdict=NULL,judge2_confidence=NULL,judge2_model=NULL,judged2_at=NULL,judge3_verdict=NULL,judge3_confidence=NULL,judge3_model=NULL,judged3_at=NULL,judge2_served_model=NULL,judge2_policy=NULL,judge3_served_model=NULL,judge3_policy=NULL WHERE id=$1 AND status='pending'"
                     };
                     c.execute(sql,&[&id]).await.map_err(internal)?;
-                    memo.as_object_mut().unwrap().remove(&id.to_string());
+                    forget_memo_verdict(&mut memo, id);
                 }
                 set_meta(c,&key,&memo).await?;
                 rows.len() as i64
@@ -434,6 +434,26 @@ async fn meta(c: &tokio_postgres::Client, key: &str) -> Result<Value, ToolError>
         .filter(|v| !v.is_null())
         .unwrap_or(json!({})))
 }
+/// Drop one proposal's remembered verdict from a review-judgments memo (an
+/// [`object_memo`], keyed by proposal id).
+fn forget_memo_verdict(memo: &mut Value, id: i64) {
+    if let Some(verdicts) = memo.as_object_mut() {
+        verdicts.remove(&id.to_string());
+    }
+}
+
+/// A judgments memo from `meta` as the object the daemon writes; any other
+/// shape (a hand-edited row) starts a fresh memo, which only costs
+/// re-judging, instead of failing the request.
+fn object_memo(memo: Value) -> Value {
+    if memo.is_object() {
+        memo
+    } else {
+        eprintln!("review judgments memo is not an object; starting a fresh one");
+        json!({})
+    }
+}
+
 async fn set_meta(c: &tokio_postgres::Client, key: &str, value: &Value) -> Result<(), ToolError> {
     c.execute("INSERT INTO meta(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",&[&key,&value]).await.map_err(internal)?;
     Ok(())
@@ -465,6 +485,20 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejudge_forgets_a_verdict_even_from_a_malformed_memo() {
+        let mut memo = object_memo(json!({"7": {"verdict": "same"}, "8": {"verdict": "distinct"}}));
+        forget_memo_verdict(&mut memo, 7);
+        assert_eq!(memo, json!({"8": {"verdict": "distinct"}}));
+        for junk in [json!([1, 2]), json!("text"), json!(3), json!(true)] {
+            let mut memo = object_memo(junk);
+            forget_memo_verdict(&mut memo, 7);
+            // The candidate memos are indexed by key after the read.
+            memo["pairs"] = json!({});
+            assert_eq!(memo, json!({"pairs": {}}));
+        }
+    }
 
     #[tokio::test]
     async fn exhausted_rejudge_budget_never_enumerates_curation() {

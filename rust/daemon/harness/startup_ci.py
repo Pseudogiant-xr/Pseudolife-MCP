@@ -42,6 +42,9 @@ SHADOW_DB_TESTS = 21
 # step (26 minutes, about 13 used by the cells) its margin.
 SHADOW_TIMEOUT_S = 600
 BANK_IDENTITY_CHECKS = (
+    # Not an identity check, but the same fixture: a disposable bank and the
+    # offline embedder through a whole Service.
+    "service::tests::a_refused_access_count_sync_is_retried_by_the_next_autosave",
     "service::tests::board_contexts_publish_one_identity_to_health",
     "service::tests::memory_tools_work_while_bank_identity_is_blocked",
     "service::tests::bank_identity_retry_wakes_on_storage_republish",

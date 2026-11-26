@@ -1411,7 +1411,13 @@ impl Service {
         })
         .await
         {
+            // Retried by the next autosave even when nothing else changed:
+            // the fingerprint leaves access counts out, so recording it here
+            // would skip the sync until some other write.
+            self.counters_pending
+                .store(true, std::sync::atomic::Ordering::SeqCst);
             eprintln!("access-count sync failed: {error}");
+            return;
         }
         *self.last_saved.lock().expect("last saved lock") = Some(fp);
     }
@@ -1530,10 +1536,16 @@ impl crate::background::Duties for Service {
             {
                 self.compact_superseded(&ready, keep, min_age).await;
             }
+            // The prunes' statements run through `txn` like every other
+            // writer statement, so once the service is initialized `inner`
+            // is released first: holding it would make every tool call's
+            // init wait out a large first prune. Before that, initialization
+            // still reads the same session outside `txn`, so it keeps waiting.
             let inner = self.inner.lock().await;
-            let Some(storage) = &inner.storage else {
+            let Some(storage) = inner.storage.clone() else {
                 return Ok(());
             };
+            let init_fence = inner.ready.is_none().then_some(inner);
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|e| e.to_string())?
@@ -1546,7 +1558,7 @@ impl crate::background::Duties for Service {
                 now - config.memory.retrieval_retention_days * 86400.0,
             )
             .await?;
-            drop(inner);
+            drop((init_fence, storage));
             if runs > 0 || retrieval > 0 {
                 eprintln!("sweep maintenance: runs_pruned={runs} retrieval_pruned={retrieval}");
             }
@@ -1756,6 +1768,114 @@ mod tests {
         ] {
             assert!(!message.contains(gone), "{gone}: {message}");
         }
+    }
+
+    /// An access-count sync the bank refuses is retried by the next
+    /// autosave even when nothing else changed: the fingerprint leaves
+    /// access counts out, so recording it after the failure skipped the
+    /// retry until some other write.
+    #[tokio::test]
+    #[ignore = "run by startup_ci.py with PostgreSQL and the offline embedder"]
+    async fn a_refused_access_count_sync_is_retried_by_the_next_autosave() {
+        use crate::mcp::dispatch::{CallIdentity, ToolCall, registry};
+
+        let dsn = identity_test_dsn();
+        let model =
+            PathBuf::from(std::env::var_os("PL_SHADOW_EMBED_FIXTURE").expect("offline embedder"));
+        let mut config = Config::default();
+        config.embedding.model_name = "pseudolife-test/access-count-fixture".into();
+        let service = Arc::new(Service::new(
+            config,
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            model.parent().unwrap().to_owned(),
+            dsn.clone(),
+            false,
+        ));
+        service.inner.lock().await.embedder = Some(Arc::new(
+            Embedder::load_config(&service.config.embedding, Some(&model), 1).unwrap(),
+        ));
+        let principals = Arc::new(crate::auth::PrincipalStore::new());
+        let board = Arc::new(crate::board::Board::new(
+            service.config.coordination.clone(),
+            dsn.clone(),
+            service.clone(),
+            principals.clone(),
+        ));
+        service.install(&board);
+        let app = crate::http::App::new(
+            service.clone(),
+            crate::auth::EnvTokens::from_lookup(&|_| None),
+            principals,
+            None,
+            board,
+        );
+        let ident = CallIdentity {
+            principal: "default".into(),
+            writer: "fixture".into(),
+            header_session: None,
+            transport_session: None,
+            headers: Default::default(),
+        };
+        let text = "The access count fixture remembers one entry.";
+        for (tool, args) in [
+            ("memory_store", json!({"text": text})),
+            ("memory_search", json!({"query": text, "top_k": 5})),
+        ] {
+            registry()[tool](
+                &app,
+                ToolCall {
+                    args: args.as_object().unwrap(),
+                    ident: &ident,
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let ready = service.ensure_init().await.unwrap();
+        let resident = ready
+            .bank
+            .read()
+            .unwrap()
+            .entries
+            .iter()
+            .find(|e| e.text == text)
+            .map(|e| {
+                (
+                    e.id,
+                    e.access_count.load(std::sync::atomic::Ordering::Relaxed),
+                )
+            })
+            .unwrap();
+        assert!(resident.1 > 0, "the search accrued no access count");
+        let mut side = crate::board::db::Conn::new(dsn);
+        let side = side.client().await.unwrap();
+        side.batch_execute(
+            "CREATE FUNCTION refuse_access_counts() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN RAISE EXCEPTION 'fixture refuses access counts'; END $$;
+            CREATE TRIGGER refuse_access_counts BEFORE UPDATE OF access_count ON public.entries
+            FOR EACH ROW EXECUTE FUNCTION refuse_access_counts()",
+        )
+        .await
+        .unwrap();
+        service.autosave_if_changed().await.unwrap();
+        side.batch_execute("DROP TRIGGER refuse_access_counts ON public.entries")
+            .await
+            .unwrap();
+        // Nothing changed since: only the refused sync is left to save.
+        service.autosave_if_changed().await.unwrap();
+        let stored: i32 = side
+            .query_one(
+                "SELECT access_count FROM public.entries WHERE id = $1",
+                &[&resident.0],
+            )
+            .await
+            .unwrap()
+            .get(0);
+        assert_eq!(
+            i64::from(stored),
+            resident.1,
+            "the refused access-count sync was never retried"
+        );
     }
 
     fn identity_test_dsn() -> String {

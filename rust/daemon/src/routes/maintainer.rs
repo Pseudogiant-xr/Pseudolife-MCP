@@ -55,21 +55,37 @@ pub(super) async fn route(req: &mut Request<'_>) -> Option<Response> {
                 Some(p) if crate::config_io::truthy(p) => p.clone(),
                 _ => serde_json::Value::Object(body),
             };
-            Some(
-                match crate::config_io::write_config(
-                    &req.app.service,
-                    &crate::config_io::process_env,
-                    &patch,
-                ) {
-                    Ok(answer) => json_response(200, &answer),
-                    Err(crate::config_io::WriteError::Invalid(text)) => {
-                        json_response(400, &serde_json::json!({"error": text}))
-                    }
-                    Err(crate::config_io::WriteError::Failed(text)) => {
-                        json_response(500, &serde_json::json!({"error": text}))
-                    }
-                },
-            )
+            // The write reads, backs up, replaces and fsyncs config.yaml under
+            // a process-wide mutex: blocking work, so off the async workers.
+            // As an admitted write it finishes even if the client hangs up,
+            // and shutdown drains it.
+            let service = req.app.service.clone();
+            let written = req
+                .app
+                .service
+                .writes
+                .spawn_blocking(move || {
+                    crate::config_io::write_config(&service, &crate::config_io::process_env, &patch)
+                })
+                .await
+                .unwrap_or_else(|failed| {
+                    Err(crate::config_io::WriteError::Failed(
+                        if failed.is_cancelled() {
+                            "config not saved: the daemon is shutting down".to_string()
+                        } else {
+                            format!("config write failed: {failed}")
+                        },
+                    ))
+                });
+            Some(match written {
+                Ok(answer) => json_response(200, &answer),
+                Err(crate::config_io::WriteError::Invalid(text)) => {
+                    json_response(400, &serde_json::json!({"error": text}))
+                }
+                Err(crate::config_io::WriteError::Failed(text)) => {
+                    json_response(500, &serde_json::json!({"error": text}))
+                }
+            })
         }
         _ => None,
     }
