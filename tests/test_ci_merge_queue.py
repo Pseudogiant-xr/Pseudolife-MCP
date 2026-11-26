@@ -140,6 +140,19 @@ git() {
   if [ -n "$PL_FILES" ]; then printf '%s\n' "$PL_FILES"; fi
   return "$PL_DIFF_EXIT"
 }
+# An ordinary pull request asks ops/ci_release_cut.py whether it is a release
+# cut (tests/test_ci_release_cut.py runs the real one): PL_CUT=1 answers yes,
+# PL_CUT=crash fails, anything else answers no.
+python3() {
+  if [ "$*" != "-m ops.ci_release_cut --base HEAD^1 --head HEAD --github-output $GITHUB_OUTPUT" ]; then
+    printf 'python3 %s\n' "$*" >> "$PL_UNEXPECTED"; return 97
+  fi
+  case "${PL_CUT:-}" in
+    1) printf 'cut=true\ninclude_frozen=true\n' >> "$GITHUB_OUTPUT" ;;
+    crash) return 1 ;;
+    *) echo "not a release cut" ;;
+  esac
+}
 '''
 
 
@@ -147,7 +160,7 @@ BATCH_REF = "integrate/2026-10-21-batch-1"
 
 
 def run_scope(tmp_path, event, files, *, base_ref="refs/heads/master", fetch_exit=0, diff_exit=0,
-              head_ref=None, before="", weekly=""):
+              head_ref=None, before="", weekly="", cut=""):
     """Run the scope step as Actions would. `head_ref` is github.head_ref,
     which Actions sets only for pull requests: by default a batch branch's,
     whose pull request is classified by its diff."""
@@ -169,7 +182,8 @@ def run_scope(tmp_path, event, files, *, base_ref="refs/heads/master", fetch_exi
     script.write_text("set -eo pipefail\n" + GIT_STUB + step["run"], encoding="utf-8", newline="\n")
     env = dict(os.environ, EVENT_NAME=event, MERGE_GROUP_BASE_REF=base_ref, HEAD_REF=head_ref, BEFORE=before, WEEKLY_FROZEN=weekly,
                GITHUB_OUTPUT=str(output), PL_UNEXPECTED=str(unexpected),
-               PL_FILES="\n".join(files), PL_FETCH_EXIT=str(fetch_exit), PL_DIFF_EXIT=str(diff_exit))
+               PL_FILES="\n".join(files), PL_FETCH_EXIT=str(fetch_exit), PL_DIFF_EXIT=str(diff_exit),
+               PL_CUT=cut)
     result = subprocess.run([BASH, str(script)], env=env, capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
     assert not unexpected.exists(), unexpected.read_text(encoding="utf-8")
@@ -336,6 +350,23 @@ def test_only_pull_requests_read_the_head_ref(tmp_path, event):
     assert run_scope(tmp_path, event, PYTHON_CHANGE, head_ref="claude/some-change") == ["python=true"]
 
 
+@pytest.mark.parametrize("head_ref", ORDINARY_REFS)
+def test_a_release_cut_pull_request_marks_its_frozen_run(tmp_path, head_ref):
+    assert run_scope(tmp_path, "pull_request", PYTHON_CHANGE, head_ref=head_ref, cut="1") == [
+        "cut=true", "include_frozen=true", "python=false"]
+
+
+def test_a_failed_release_cut_check_keeps_the_fast_lanes(tmp_path):
+    assert run_scope(tmp_path, "pull_request", PYTHON_CHANGE, head_ref="claude/some-change",
+                     cut="crash") == ["python=false"]
+
+
+def test_a_batch_never_asks_the_release_cut_check(tmp_path):
+    # The stub records any call it was not expecting; a batch is classified
+    # by its diff alone, whatever the check would say.
+    assert run_scope(tmp_path, "pull_request", PYTHON_CHANGE, cut="1") == ["python=true"]
+
+
 BATCH_PASSED = "fromJSON(needs.scope.outputs.batch_passed || '[]')"
 
 
@@ -344,7 +375,10 @@ def test_the_fast_lanes_skip_every_suite_lane_and_keep_guards():
     assert "test-lite-linux" not in jobs
     for name in ("test", "test-lite-windows", "test-lite-macos"):
         assert jobs[name]["needs"] == "scope", name
-        assert jobs[name]["if"] == ("${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' "
+        # A release cut's own pull request runs `test` alone (scope's cut).
+        python = ("(needs.scope.outputs.python != 'false' || needs.scope.outputs.cut == 'true')" if name == "test"
+                  else "needs.scope.outputs.python != 'false'")
+        assert jobs[name]["if"] == ("${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && " + python + " "
                                     f"&& !contains({BATCH_PASSED}, '{name}') }}}}"), name
     assert jobs["guards"]["if"] == "needs.scope.outputs.python == 'false'"
     # Docs skip these jobs. Other changes retain the same-tree batch reuse

@@ -1,0 +1,584 @@
+{
+ "runs": [
+  {
+   "id": 45747873168,
+   "event": "pull_request",
+   "head_branch": "integrate/2026-11-26-batch-6",
+   "head_sha": "ff00070925a555b420762b09bd2b7f113e75423b",
+   "run_attempt": 3,
+   "created_at": "2026-11-26T03:16:41Z",
+   "path": ".github/workflows/ci.yml",
+   "conclusion": "failure",
+   "head_repository": {
+    "full_name": "Pseudogiant-xr/Pseudolife-MCP"
+   },
+   "workflow": "ci.yml",
+   "jobs": [
+    {
+     "id": 139668228751,
+     "run_id": 45747873168,
+     "run_attempt": 1,
+     "name": "scope",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-26T03:16:43Z",
+     "completed_at": "2026-11-26T03:16:54Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-26T03:16:44Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-26T03:16:44Z"
+      }
+     ]
+    },
+    {
+     "id": 139668302754,
+     "run_id": 45747873168,
+     "run_attempt": 1,
+     "name": "test",
+     "status": "completed",
+     "conclusion": "failure",
+     "started_at": "2026-11-26T03:16:56Z",
+     "completed_at": "2026-11-26T04:00:01Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-26T03:16:58Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-26T03:16:57Z"
+      }
+     ]
+    },
+    {
+     "id": 139668302769,
+     "run_id": 45747873168,
+     "run_attempt": 1,
+     "name": "test-lite-windows",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-26T03:16:56Z",
+     "completed_at": "2026-11-26T03:53:17Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-26T03:16:59Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-26T03:16:57Z"
+      }
+     ]
+    },
+    {
+     "id": 139683568984,
+     "run_id": 45747873168,
+     "run_attempt": 2,
+     "name": "test",
+     "status": "completed",
+     "conclusion": "failure",
+     "started_at": "2026-11-26T04:01:39Z",
+     "completed_at": "2026-11-26T04:55:39Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-26T04:01:42Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-26T04:01:40Z"
+      }
+     ]
+    },
+    {
+     "id": 139683571046,
+     "run_id": 45747873168,
+     "run_attempt": 2,
+     "name": "scope",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-26T03:16:43Z",
+     "completed_at": "2026-11-26T03:16:54Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-26T03:16:44Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-26T03:16:44Z"
+      }
+     ]
+    },
+    {
+     "id": 139683618439,
+     "run_id": 45747873168,
+     "run_attempt": 2,
+     "name": "test-lite-windows",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-26T03:16:56Z",
+     "completed_at": "2026-11-26T03:53:17Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-26T03:16:59Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-26T03:16:57Z"
+      }
+     ]
+    },
+    {
+     "id": 139702370385,
+     "run_id": 45747873168,
+     "run_attempt": 3,
+     "name": "test",
+     "status": "completed",
+     "conclusion": "failure",
+     "started_at": "2026-11-26T04:57:03Z",
+     "completed_at": "2026-11-26T05:50:40Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-26T04:57:05Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-26T04:57:04Z"
+      }
+     ]
+    },
+    {
+     "id": 139702371206,
+     "run_id": 45747873168,
+     "run_attempt": 3,
+     "name": "scope",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-26T03:16:43Z",
+     "completed_at": "2026-11-26T03:16:54Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-26T03:16:44Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-26T03:16:44Z"
+      }
+     ]
+    },
+    {
+     "id": 139702371643,
+     "run_id": 45747873168,
+     "run_attempt": 3,
+     "name": "test-lite-windows",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-26T03:16:56Z",
+     "completed_at": "2026-11-26T03:53:17Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-26T03:16:59Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-26T03:16:57Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": 45512966117,
+   "event": "pull_request",
+   "head_branch": "integrate/2026-11-25-batch-5",
+   "head_sha": "08aa10645773ab7dc280505dd9c6b2313b9f4886",
+   "run_attempt": 2,
+   "created_at": "2026-11-24T23:48:01Z",
+   "path": ".github/workflows/ci.yml",
+   "conclusion": "success",
+   "head_repository": {
+    "full_name": "Pseudogiant-xr/Pseudolife-MCP"
+   },
+   "workflow": "ci.yml",
+   "jobs": [
+    {
+     "id": 138865107746,
+     "run_id": 45512966117,
+     "run_attempt": 1,
+     "name": "scope",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-24T23:48:04Z",
+     "completed_at": "2026-11-24T23:48:17Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-24T23:48:05Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-24T23:48:05Z"
+      }
+     ]
+    },
+    {
+     "id": 138865227511,
+     "run_id": 45512966117,
+     "run_attempt": 1,
+     "name": "test",
+     "status": "completed",
+     "conclusion": "failure",
+     "started_at": "2026-11-24T23:48:19Z",
+     "completed_at": "2026-11-25T00:42:14Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-24T23:48:22Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-24T23:48:20Z"
+      }
+     ]
+    },
+    {
+     "id": 138865227543,
+     "run_id": 45512966117,
+     "run_attempt": 1,
+     "name": "test-lite-windows",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-24T23:48:19Z",
+     "completed_at": "2026-11-25T00:23:07Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-24T23:48:24Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-24T23:48:21Z"
+      }
+     ]
+    },
+    {
+     "id": 138890627461,
+     "run_id": 45512966117,
+     "run_attempt": 2,
+     "name": "test",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-25T00:44:38Z",
+     "completed_at": "2026-11-25T01:37:01Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-25T00:44:40Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-25T00:44:38Z"
+      }
+     ]
+    },
+    {
+     "id": 138890629255,
+     "run_id": 45512966117,
+     "run_attempt": 2,
+     "name": "test-lite-windows",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-24T23:48:19Z",
+     "completed_at": "2026-11-25T00:23:07Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-24T23:48:24Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-24T23:48:21Z"
+      }
+     ]
+    },
+    {
+     "id": 138890698435,
+     "run_id": 45512966117,
+     "run_attempt": 2,
+     "name": "scope",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-24T23:48:04Z",
+     "completed_at": "2026-11-24T23:48:17Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-24T23:48:05Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-24T23:48:05Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": 45533353153,
+   "event": "pull_request",
+   "head_branch": "integrate/2026-11-25-batch-6",
+   "head_sha": "fa6e532978ce8928411547c314b2e64126d10712",
+   "run_attempt": 1,
+   "created_at": "2026-11-25T02:29:51Z",
+   "path": ".github/workflows/rust.yml",
+   "conclusion": "success",
+   "head_repository": {
+    "full_name": "Pseudogiant-xr/Pseudolife-MCP"
+   },
+   "workflow": "rust.yml",
+   "jobs": [
+    {
+     "id": 138933878982,
+     "run_id": 45533353153,
+     "run_attempt": 1,
+     "name": "Scope",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-25T02:29:54Z",
+     "completed_at": "2026-11-25T02:30:08Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-25T02:29:55Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-25T02:29:54Z"
+      }
+     ]
+    },
+    {
+     "id": 138938739518,
+     "run_id": 45533353153,
+     "run_attempt": 1,
+     "name": "Parity checks / ubuntu-latest / cli",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-25T02:42:08Z",
+     "completed_at": "2026-11-25T02:55:05Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-25T02:42:11Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-25T02:42:09Z"
+      }
+     ]
+    },
+    {
+     "id": 138938739556,
+     "run_id": 45533353153,
+     "run_attempt": 1,
+     "name": "Parity checks / windows-latest / cli",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-25T02:42:08Z",
+     "completed_at": "2026-11-25T03:11:31Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-25T02:42:11Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-25T02:42:09Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": 45106587399,
+   "event": "pull_request",
+   "head_branch": "t3/installer-exit-5-hooks-plugin-extractor",
+   "head_sha": "60bda13f52a6a0e1d882f32b1d759a7f4ded9a0e",
+   "run_attempt": 1,
+   "created_at": "2026-11-23T03:32:31Z",
+   "path": ".github/workflows/rust.yml",
+   "conclusion": "success",
+   "head_repository": {
+    "full_name": "Pseudogiant-xr/Pseudolife-MCP"
+   },
+   "workflow": "rust.yml",
+   "jobs": [
+    {
+     "id": 137469282228,
+     "run_id": 45106587399,
+     "run_attempt": 1,
+     "name": "Rust / windows-latest",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-23T03:32:55Z",
+     "completed_at": "2026-11-23T05:03:24Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-23T03:32:58Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-23T03:32:56Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": 45052267402,
+   "event": "pull_request",
+   "head_branch": "integrate/2026-11-23-batch-2",
+   "head_sha": "3b4d13c8b4e4225246c355a649d2655fa27b2fc5",
+   "run_attempt": 1,
+   "created_at": "2026-11-22T17:56:57Z",
+   "path": ".github/workflows/rust.yml",
+   "conclusion": "success",
+   "head_repository": {
+    "full_name": "Pseudogiant-xr/Pseudolife-MCP"
+   },
+   "workflow": "rust.yml",
+   "jobs": [
+    {
+     "id": 137299879082,
+     "run_id": 45052267402,
+     "run_attempt": 1,
+     "name": "Rust / ubuntu-latest",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-22T17:57:17Z",
+     "completed_at": "2026-11-22T18:24:41Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-22T17:57:18Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-22T17:57:17Z"
+      }
+     ]
+    },
+    {
+     "id": 137299879109,
+     "run_id": 45052267402,
+     "run_attempt": 1,
+     "name": "Rust / windows-latest",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-22T17:57:16Z",
+     "completed_at": "2026-11-22T19:09:15Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-22T17:57:18Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-22T17:57:17Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": 43507789403,
+   "event": "workflow_dispatch",
+   "head_branch": "feat/native-restore",
+   "head_sha": "c0a672ccdca8474b60f21f627d3dec618107ef00",
+   "run_attempt": 1,
+   "created_at": "2026-11-13T21:07:14Z",
+   "path": ".github/workflows/rust.yml",
+   "conclusion": "cancelled",
+   "head_repository": {
+    "full_name": "Pseudogiant-xr/Pseudolife-MCP"
+   },
+   "workflow": "rust.yml",
+   "jobs": [
+    {
+     "id": 132169863179,
+     "run_id": 43507789403,
+     "run_attempt": 1,
+     "name": "Scope",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-13T21:20:44Z",
+     "completed_at": "2026-11-13T21:21:09Z",
+     "steps": [
+      {
+       "completed_at": "2026-11-13T21:20:47Z",
+       "conclusion": "success",
+       "name": "Set up job",
+       "started_at": "2026-11-13T21:20:45Z"
+      }
+     ]
+    },
+    {
+     "id": 132177167249,
+     "run_id": 43507789403,
+     "run_attempt": 1,
+     "name": "Candidate / windows-latest",
+     "status": "completed",
+     "conclusion": "cancelled",
+     "started_at": "2026-11-13T21:21:10Z",
+     "completed_at": "2026-11-13T21:50:29Z",
+     "steps": []
+    }
+   ]
+  }
+ ],
+ "artifacts": {
+  "45747873168": [
+   {
+    "created_at": "2026-11-26T05:50:35Z",
+    "expired": false,
+    "id": 15090474246,
+    "name": "test-diagnostics",
+    "size_in_bytes": 563634
+   },
+   {
+    "created_at": "2026-11-26T04:55:35Z",
+    "expired": false,
+    "id": 15088089826,
+    "name": "test-diagnostics",
+    "size_in_bytes": 564083
+   },
+   {
+    "created_at": "2026-11-26T03:59:58Z",
+    "expired": false,
+    "id": 15085693566,
+    "name": "test-diagnostics",
+    "size_in_bytes": 912259
+   },
+   {
+    "created_at": "2026-11-26T03:52:43Z",
+    "expired": false,
+    "id": 15085363284,
+    "name": "test-lite-windows-results",
+    "size_in_bytes": 37077
+   }
+  ],
+  "45512966117": [
+   {
+    "created_at": "2026-11-25T01:36:59Z",
+    "expired": false,
+    "id": 14983680398,
+    "name": "test-diagnostics",
+    "size_in_bytes": 917820
+   },
+   {
+    "created_at": "2026-11-25T00:42:08Z",
+    "expired": false,
+    "id": 14980140415,
+    "name": "test-diagnostics",
+    "size_in_bytes": 561120
+   },
+   {
+    "created_at": "2026-11-25T00:23:03Z",
+    "expired": false,
+    "id": 14979011418,
+    "name": "test-lite-windows-results",
+    "size_in_bytes": 36384
+   }
+  ]
+ },
+ "members": {
+  "15085693566": {
+   "cpu.txt": "Architecture:                            x86_64\nCPU(s):                                  4\nVendor ID:                               GenuineIntel\nModel name:                              INTEL(R) XEON(R) PLATINUM 8573C\nThread(s) per core:                      2\n",
+   "process.txt": "Command exited with non-zero status 1\n\tCommand being timed: \"timeout --signal=ABRT --kill-after=60s 50m python -m pytest -p ops.pytest_failure_lines --include-frozen -q -n 2 --dist loadfile -ra --durations=50 --durations-min=1 --junitxml=ci-results/junit.xml\"\n\tUser time (seconds): 4355.23\n\tSystem time (seconds): 570.27\n\tPercent of CPU this job got: 206%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 39:44.41\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 4394772\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 76768\n\tMinor (reclaiming a frame) page faults: 106708690\n\tVoluntary context switches: 3712726\n\tInvoluntary context switches: 1223943\n\tSwaps: 0\n\tFile system inputs: 3589360\n\tFile system outputs: 18636616\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 1\n"
+  },
+  "15088089826": {
+   "cpu.txt": "Architecture:                            x86_64\nCPU(s):                                  4\nVendor ID:                               AuthenticAMD\nModel name:                              AMD EPYC 7763 64-Core Processor\nThread(s) per core:                      2\n",
+   "process.txt": "Command exited with non-zero status 124\n\tCommand being timed: \"timeout --signal=ABRT --kill-after=60s 50m python -m pytest -p ops.pytest_failure_lines --include-frozen -q -n 2 --dist loadfile -ra --durations=50 --durations-min=1 --junitxml=ci-results/junit.xml\"\n\tUser time (seconds): 33.53\n\tSystem time (seconds): 7.28\n\tPercent of CPU this job got: 1%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 50:28.38\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 724828\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 80672\n\tMinor (reclaiming a frame) page faults: 290957\n\tVoluntary context switches: 268463\n\tInvoluntary context switches: 27292\n\tSwaps: 0\n\tFile system inputs: 1521848\n\tFile system outputs: 17696\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 124\n"
+  },
+  "15090474246": {
+   "cpu.txt": "Architecture:                            x86_64\nCPU(s):                                  4\nVendor ID:                               AuthenticAMD\nModel name:                              AMD EPYC 7763 64-Core Processor\nThread(s) per core:                      2\n",
+   "process.txt": "Command exited with non-zero status 124\n\tCommand being timed: \"timeout --signal=ABRT --kill-after=60s 50m python -m pytest -p ops.pytest_failure_lines --include-frozen -q -n 2 --dist loadfile -ra --durations=50 --durations-min=1 --junitxml=ci-results/junit.xml\"\n\tUser time (seconds): 33.95\n\tSystem time (seconds): 6.32\n\tPercent of CPU this job got: 1%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 50:12.77\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 724932\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 57275\n\tMinor (reclaiming a frame) page faults: 228474\n\tVoluntary context switches: 245950\n\tInvoluntary context switches: 27669\n\tSwaps: 0\n\tFile system inputs: 768752\n\tFile system outputs: 17656\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 124\n"
+  },
+  "14980140415": {
+   "cpu.txt": "Architecture:                            x86_64\nCPU(s):                                  4\nVendor ID:                               AuthenticAMD\nModel name:                              AMD EPYC 7763 64-Core Processor\nThread(s) per core:                      2\n",
+   "process.txt": "Command exited with non-zero status 124\n\tCommand being timed: \"timeout --signal=ABRT --kill-after=60s 50m python -m pytest -p ops.pytest_failure_lines --include-frozen -q -n 2 --dist loadfile -ra --durations=50 --durations-min=1 --junitxml=ci-results/junit.xml\"\n\tUser time (seconds): 34.14\n\tSystem time (seconds): 6.44\n\tPercent of CPU this job got: 1%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 50:14.84\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 723932\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 51446\n\tMinor (reclaiming a frame) page faults: 229380\n\tVoluntary context switches: 240455\n\tInvoluntary context switches: 27971\n\tSwaps: 0\n\tFile system inputs: 739472\n\tFile system outputs: 17616\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 124\n"
+  },
+  "14983680398": {
+   "cpu.txt": "Architecture:                            x86_64\nCPU(s):                                  4\nVendor ID:                               AuthenticAMD\nModel name:                              AMD EPYC 7763 64-Core Processor\nThread(s) per core:                      2\n",
+   "process.txt": "\tCommand being timed: \"timeout --signal=ABRT --kill-after=60s 50m python -m pytest -p ops.pytest_failure_lines --include-frozen -q -n 2 --dist loadfile -ra --durations=50 --durations-min=1 --junitxml=ci-results/junit.xml\"\n\tUser time (seconds): 5629.96\n\tSystem time (seconds): 893.18\n\tPercent of CPU this job got: 220%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 49:17.95\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 4389256\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 176839\n\tMinor (reclaiming a frame) page faults: 98478552\n\tVoluntary context switches: 4062765\n\tInvoluntary context switches: 1714680\n\tSwaps: 0\n\tFile system inputs: 5958840\n\tFile system outputs: 18630384\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+  }
+ }
+}
