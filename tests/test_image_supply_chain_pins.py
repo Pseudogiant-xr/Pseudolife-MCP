@@ -1,7 +1,8 @@
-"""Every network input of the extractor and Rust daemon images is pinned and checked.
+"""The extractor image's inputs and the Rust daemon image's ONNX Runtime are pinned.
 
 A floating base tag or an unverified download lets the bytes a user builds
-change under the same Dockerfile. Each guard has a near-miss test that feeds
+change under the same Dockerfile. (The Rust daemon's own base images are
+not pinned here.) Each guard has a near-miss test that feeds
 it the unpinned form and expects a refusal.
 """
 import re

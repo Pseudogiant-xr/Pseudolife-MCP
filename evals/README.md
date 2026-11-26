@@ -297,11 +297,13 @@ Note this is *separate* from the default-on compose sidecar
 and reachable only by the daemon on the compose network.
 
 **Gemma E2B** — bake the E2B image (the shipped default is now the E4B v3
-fine-tune, so E2B needs an explicit `MODEL_URL`), then serve it:
+fine-tune, so E2B needs an explicit `MODEL_URL` and the `MODEL_SHA256` the
+build checks it against), then serve it:
 
 ```bash
 docker build -f ops/Dockerfile.extractor -t pseudolife-extractor:gemma4-e2b \
-  --build-arg MODEL_URL=https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf ops
+  --build-arg MODEL_URL=https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/66a399f68ddd113b06dff02fca9523e55465d11d/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf \
+  --build-arg MODEL_SHA256=e531007218dfab990486a5de7676a6932d6ea8dea233d1f698d7c21cf8a16889 ops
 docker run -d --name pseudolife-mcp-extractor-bench -p 127.0.0.1:8081:8081 \
   pseudolife-extractor:gemma4-e2b
 ```
@@ -313,7 +315,8 @@ the base explicitly for a like-for-like rung):
 
 ```bash
 docker build -f ops/Dockerfile.extractor -t pseudolife-extractor:gemma4-e4b-base \
-  --build-arg MODEL_URL=https://huggingface.co/unsloth/gemma-4-E4B-it-qat-GGUF/resolve/main/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf ops
+  --build-arg MODEL_URL=https://huggingface.co/unsloth/gemma-4-E4B-it-qat-GGUF/resolve/8c5a9e4fd5482e2be20fe0bf013b4c262a8f4265/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
+  --build-arg MODEL_SHA256=df0fd4ee07072c607c29a0a1cb4f98918426cca12f45a2776bdd6ee6d09a4de3 ops
 docker rm -f pseudolife-mcp-extractor-bench
 docker run -d --name pseudolife-mcp-extractor-bench -p 127.0.0.1:8081:8081 \
   pseudolife-extractor:gemma4-e4b-base
