@@ -1,2 +1,0 @@
-### Added (2026-11-25 — the Rust regression gate has a measured baseline)
-- `evals/results/rust-quality/regression_gate.baseline.json` is the Rust regression gate's first measured baseline, so `evals/regression_gate.ps1` can now compare a run against it instead of refusing for want of one. It was established on 25 November 2026 on the reproducible Qwen server, over two byte-identical replicates, and records each arm's mean and margin. A test checks that the committed file passes the gate's own baseline check.
