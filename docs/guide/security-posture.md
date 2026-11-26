@@ -176,7 +176,8 @@ problem than the limitation it hides.
   wrote four hundred facts about one entity. The **review queue** and the
   Console's counts are how a human would notice, and only if they look.
 - **Ingested-document provenance.** `document_ingest` indexes what you
-  point it at; the reference bank carries no trust tier of its own.
+  point it at inside its documents directories; the reference bank carries
+  no trust tier of its own.
 - **World-fact citations are not verified.** A **world fact** carries a
   source URL and a quote because someone asserted them. Nothing fetches
   the URL to confirm the quote is there.

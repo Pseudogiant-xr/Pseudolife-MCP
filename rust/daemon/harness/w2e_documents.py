@@ -77,7 +77,8 @@ FIXTURES: dict[str, bytes] = {
     "nul.txt": b"A PDF's extracted text can carry NUL\x00characters\x00like these.\n",
 }
 
-MISSING = "/nonexistent-pl-w2e-documents/missing.txt"
+# Inside the documents directory, so both daemons answer file_not_found.
+MISSING = "@DOCS@/nonexistent/missing.txt"
 
 # PDFs from the corpus the extraction goldens cover (``pdf_corpus/``):
 # multi-page, CSS-hyphenated browser output, several scripts, and the
@@ -424,3 +425,9 @@ SCENARIOS: dict[str, dict] = {
         ],
     },
 }
+
+# The Rust daemon reads only from its documents directories (DOC-INGEST-ROOTS):
+# every documents scenario names the fixture directory as one; the frozen
+# oracle ignores the variable. ``w2e.side_env`` resolves ``@DOCS@``.
+for _scenario in SCENARIOS.values():
+    _scenario.setdefault("env", {})["PSEUDOLIFE_DAEMON_DOCUMENT_ROOTS"] = "@DOCS@"

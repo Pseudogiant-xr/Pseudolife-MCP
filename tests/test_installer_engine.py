@@ -20,6 +20,10 @@ def helper(tmp_path, monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path / "data"))
+    # prepare creates the documents folder under the home directory.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
     state = {"labels": None, "calls": [], "fail": None}
 
     def docker(*args, capture=True, timeout=60):
@@ -94,6 +98,55 @@ def test_fresh_rust_install_pulls_provisions_then_records_only_after_health(help
     assert module.detect() == "rust"
     # update verifies the same record the installer wrote.
     assert eng._validated_engine_selection(state["labels"])["image"].endswith("-rust:0.23.0")
+
+
+def test_a_rust_install_creates_the_documents_folder_once_and_mounts_it(helper, tmp_path, capsys):
+    module, state, repo = helper
+    folder = tmp_path / "home" / ".pseudolife-mcp" / "documents"
+    [overlay] = module.prepare(repo, "rust")
+    assert folder.is_dir()
+    if os.name != "nt":
+        assert folder.stat().st_mode & 0o777 == 0o755
+        assert folder.parent.stat().st_mode & 0o777 == 0o700
+    assert f"Created the documents folder {folder}" in capsys.readouterr().err
+    text = overlay.read_text(encoding="utf-8")
+    assert '      - "~/.pseudolife-mcp/documents:/documents:ro"' in text
+    assert '      PSEUDOLIFE_DAEMON_DOCUMENT_ROOTS: "/documents"' in text
+    # A rerun (the accepted selection, as on a set-up host) changes nothing
+    # and says nothing about the folder.
+    (folder / "kept.md").write_text("kept", encoding="utf-8")
+    _started(module, state)
+    module.accept()
+    assert module.prepare(repo, "rust") == [overlay]
+    assert "documents folder" not in capsys.readouterr().err
+    assert (folder / "kept.md").read_text(encoding="utf-8") == "kept"
+    # An accepted host whose folder is gone gets it back on a rerun.
+    (folder / "kept.md").unlink()
+    folder.rmdir()
+    assert module.prepare(repo, "rust") == [overlay]
+    assert folder.is_dir()
+    # The Python engine gets no overlay.
+    assert module.prepare(repo, "python") == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX ownership")
+def test_a_documents_folder_another_account_owns_is_named(helper, tmp_path, monkeypatch, capsys):
+    module, state, repo = helper
+    folder = tmp_path / "home" / ".pseudolife-mcp" / "documents"
+    folder.mkdir(parents=True)
+    monkeypatch.setattr(os, "geteuid", lambda: folder.stat().st_uid + 1)
+    module.prepare(repo, "rust")
+    assert "belongs to another account" in capsys.readouterr().err
+
+
+def test_a_file_where_the_documents_folder_goes_refuses_the_install(helper, tmp_path):
+    module, state, repo = helper
+    folder = tmp_path / "home" / ".pseudolife-mcp" / "documents"
+    folder.parent.mkdir(parents=True)
+    folder.write_text("not a folder", encoding="utf-8")
+    with pytest.raises(module.Refusal, match="exists but is not a folder"):
+        module.prepare(repo, "rust")
+    assert folder.read_text(encoding="utf-8") == "not a folder"
 
 
 def test_accept_waits_for_a_ready_daemon_at_its_release(helper):

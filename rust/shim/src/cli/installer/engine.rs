@@ -42,6 +42,10 @@ const OVERLAY: &str = "docker-compose.engine-installer.yml";
 const PROJECT: &str = "pseudolife-mcp";
 const MODELS_VOLUME: &str = "pseudolife_rust_models";
 const MODELS_DIR: &str = "/models";
+/// The documents folder `document_ingest` reads from, as the release
+/// overlay mounts it (Compose resolves `~` to the home of whoever runs it).
+const DOCUMENTS_MOUNT: &str = "~/.pseudolife-mcp/documents:/documents:ro";
+const DOCUMENTS_ROOTS: &str = "/documents";
 const DEFAULT_DAEMON_URL: &str = "http://127.0.0.1:8765";
 const NO_DOCKER: &str =
     "Cannot reach Docker; start Docker and rerun the installer. Nothing was started.";
@@ -294,36 +298,11 @@ fn quoted(text: &str) -> String {
 }
 
 /// A YAML daemon overlay: JSON strings are YAML scalars; `!reset` drops the
-/// build. The models volume matches `docker-compose.rust-ghcr.yml`, which
-/// later release updates apply, so both keep the models outside /data.
+/// build. The models volume and the documents folder match
+/// `docker-compose.rust-ghcr.yml`, which later release updates apply, so
+/// both keep the models outside /data.
 fn write_overlay(image: &str, labels: &Map<String, Value>) -> io::Result<PathBuf> {
-    let mut lines = vec![
-        "# Written by the installer from the accepted engine selection; rerunning rewrites it."
-            .to_owned(),
-        "services:".to_owned(),
-        format!("  {DAEMON_SERVICE}:"),
-        format!("    image: {}", quoted(image)),
-        "    build: !reset null".to_owned(),
-        "    environment:".to_owned(),
-        format!("      PSEUDOLIFE_DAEMON_MODELS_DIR: {}", quoted(MODELS_DIR)),
-        "    volumes:".to_owned(),
-        format!(
-            "      - {}",
-            quoted(&format!("{MODELS_VOLUME}:{MODELS_DIR}"))
-        ),
-        "    labels:".to_owned(),
-    ];
-    let mut sorted: Vec<_> = labels.iter().collect();
-    sorted.sort_by(|a, b| a.0.cmp(b.0));
-    for (key, value) in sorted {
-        let value = value
-            .as_str()
-            .map(quoted)
-            .unwrap_or_else(|| value.to_string());
-        lines.push(format!("      {}: {value}", quoted(key)));
-    }
-    lines.extend(["volumes:".to_owned(), format!("  {MODELS_VOLUME}: {{}}")]);
-    let body = lines.join("\n") + "\n";
+    let body = overlay_body(image, labels);
     let path = overlay_path();
     fs::create_dir_all(path.parent().expect("overlay directory"))?;
     // Python's read_text/write_text: compared as text (universal newlines),
@@ -342,6 +321,42 @@ fn write_overlay(image: &str, labels: &Map<String, Value>) -> io::Result<PathBuf
         fs::rename(&temporary, &path)?;
     }
     Ok(path)
+}
+
+/// The installer overlay's text (`write_overlay`).
+fn overlay_body(image: &str, labels: &Map<String, Value>) -> String {
+    let mut lines = vec![
+        "# Written by the installer from the accepted engine selection; rerunning rewrites it."
+            .to_owned(),
+        "services:".to_owned(),
+        format!("  {DAEMON_SERVICE}:"),
+        format!("    image: {}", quoted(image)),
+        "    build: !reset null".to_owned(),
+        "    environment:".to_owned(),
+        format!("      PSEUDOLIFE_DAEMON_MODELS_DIR: {}", quoted(MODELS_DIR)),
+        format!(
+            "      PSEUDOLIFE_DAEMON_DOCUMENT_ROOTS: {}",
+            quoted(DOCUMENTS_ROOTS)
+        ),
+        "    volumes:".to_owned(),
+        format!(
+            "      - {}",
+            quoted(&format!("{MODELS_VOLUME}:{MODELS_DIR}"))
+        ),
+        format!("      - {}", quoted(DOCUMENTS_MOUNT)),
+        "    labels:".to_owned(),
+    ];
+    let mut sorted: Vec<_> = labels.iter().collect();
+    sorted.sort_by(|a, b| a.0.cmp(b.0));
+    for (key, value) in sorted {
+        let value = value
+            .as_str()
+            .map(quoted)
+            .unwrap_or_else(|| value.to_string());
+        lines.push(format!("      {}: {value}", quoted(key)));
+    }
+    lines.extend(["volumes:".to_owned(), format!("  {MODELS_VOLUME}: {{}}")]);
+    lines.join("\n") + "\n"
 }
 
 /// The service the installer overlay names (image and labels only).
@@ -520,6 +535,7 @@ fn prepare(repo: &Path, engine: &str, default: bool) -> Result<Vec<PathBuf>> {
     if let Some(kept) = kept {
         let image = kept["image"].as_str().unwrap_or_default().to_owned();
         let labels = kept["labels"].as_object().cloned().unwrap_or_default();
+        documents_folder()?;
         return written(write_overlay(&image, &labels));
     }
     let attempt = (|| -> Result<(String, String)> {
@@ -547,7 +563,43 @@ fn prepare(repo: &Path, engine: &str, default: bool) -> Result<Vec<PathBuf>> {
     labels.insert(ENGINE_LABEL.into(), json!("rust"));
     labels.insert(ACTIVATION_LABEL.into(), json!(activation()));
     labels.insert(RELEASE_LABEL.into(), json!(version));
+    documents_folder()?;
     written(write_overlay(&image, &labels))
+}
+
+/// The documents folder the overlay mounts, created once
+/// (`update::documents`); an existing one is left as it is.
+fn documents_folder() -> Result<()> {
+    documents_folder_in(&crate::cli::update::documents::compose_home())
+}
+
+fn documents_folder_in(home: &Path) -> Result<()> {
+    use crate::cli::update::documents;
+    let folder = documents::default_folder(home);
+    match documents::ensure(&folder) {
+        Ok(documents::Outcome::Unchanged) => {
+            if let Some(note) = documents::owner_note(&folder) {
+                let _ = writeln!(io::stderr().lock(), "WARNING: {note}.");
+            }
+            Ok(())
+        }
+        Ok(documents::Outcome::Created) => {
+            let mut err = io::stderr().lock();
+            if let Some(note) = documents::open_parent_note(&folder) {
+                let _ = writeln!(err, "WARNING: {note}.");
+            }
+            let _ = writeln!(
+                err,
+                "Created the documents folder {}: document_ingest reads files copied there as /documents/<name>.",
+                folder.display()
+            );
+            Ok(())
+        }
+        Err(e) => Err(refusal(format!(
+            "Cannot create the documents folder {}: {e}; create it yourself and rerun. Nothing was started.",
+            folder.display()
+        ))),
+    }
 }
 
 impl crate::cli::ownership::Docker for Installer {
@@ -1223,5 +1275,45 @@ mod tests {
         assert_eq!(one.len(), 32);
         assert!(one.bytes().all(|b| b.is_ascii_hexdigit()));
         assert_ne!(one, activation());
+    }
+
+    #[test]
+    fn the_overlay_mounts_the_documents_folder_the_release_overlay_names() {
+        // The release overlay names the same two (tests/test_update_engine.py).
+        let body = overlay_body("img", &Map::new());
+        let lines: Vec<&str> = body.lines().collect();
+        assert!(
+            lines.contains(&r#"      PSEUDOLIFE_DAEMON_DOCUMENT_ROOTS: "/documents""#),
+            "{body}"
+        );
+        assert!(
+            lines.contains(&r#"      - "~/.pseudolife-mcp/documents:/documents:ro""#),
+            "{body}"
+        );
+    }
+
+    #[test]
+    fn the_install_creates_the_documents_folder_once() {
+        let home = std::env::temp_dir().join(format!(
+            "pl-installer-documents-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&home).unwrap();
+        let folder = home.join(".pseudolife-mcp").join("documents");
+        documents_folder_in(&home).unwrap();
+        assert!(folder.is_dir());
+        fs::write(folder.join("kept.md"), b"kept").unwrap();
+        documents_folder_in(&home).unwrap();
+        assert_eq!(fs::read(folder.join("kept.md")).unwrap(), b"kept");
+        fs::remove_dir_all(&folder).unwrap();
+        fs::write(&folder, b"not a folder").unwrap();
+        let refused = documents_folder_in(&home).unwrap_err();
+        assert!(
+            refused.message.contains("not a folder"),
+            "{}",
+            refused.message
+        );
+        let _ = fs::remove_dir_all(&home);
     }
 }

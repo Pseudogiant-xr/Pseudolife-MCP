@@ -4257,6 +4257,45 @@ In **file mode only**, wipe memory by deleting `data/` and restarting; wipe
 just the associative store via `data/memory_state/`. (In containerized mode these files are not the source
 of truth — see the volume note above.)
 
+### Documents directory
+
+`document_ingest` reads only files inside its documents directories, so an
+agent can index a document you put there and nothing else on the daemon's
+machine. The Docker install creates `~/.pseudolife-mcp/documents` (on
+Windows `%USERPROFILE%\.pseudolife-mcp\documents`) and mounts it
+read-only into the daemon container at `/documents`; copy a file there and
+ingest it as `/documents/<name>` (subdirectories work too). Install and
+`pseudolife-mcp update` create the folder when it is missing and change
+nothing when it is there.
+
+- `memory.reference.ingest_roots` in `config.yaml` (a list of absolute
+  directories) adds documents directories, for example a directory you
+  mount into the container yourself.
+- `PSEUDOLIFE_DAEMON_DOCUMENT_ROOTS` (a path list, `:`-separated on Linux
+  and macOS, `;` on Windows) names more; the shipped Compose files set it
+  to `/documents` beside the mount.
+- The daemon reads from the union of both. With neither set every ingest is
+  refused as `no_document_roots`, and a configured directory that does not
+  exist is skipped.
+- A path is resolved first (links followed, `..` applied) and must still be
+  inside a documents directory, which is itself resolved, so a link leading
+  out of one is refused as `document_outside_roots`, as is any path outside,
+  whether or not it exists.
+- `/proc`, `/sys`, `/dev` and `/` can never be documents directories: the
+  daemon refuses to start with one configured.
+- On Linux the folder is world-readable (`0755`) so the container's daemon
+  account can read it, inside the owner-only `~/.pseudolife-mcp`, which
+  keeps other users of the machine out; files you copy in need to be
+  readable by others too (the default `umask` makes them so), and a file
+  the daemon cannot read is refused as `document_unreadable` with the
+  `chmod` that fixes it.
+- A daemon that already mounts something else at `/documents` stops
+  `pseudolife-mcp update` before anything changes: move that mount to
+  another container path and add the path to `memory.reference.ingest_roots`.
+- If Docker created the folder before the native update could (an update
+  run by an older client), it belongs to root; install and update then name
+  the `sudo chown` that gives it back to you.
+
 ## The test suite's Postgres login: `pseudolife-mcp test-login`
 
 The bundled Postgres serves the bank and the test suite's databases under

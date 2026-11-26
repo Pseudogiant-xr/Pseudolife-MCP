@@ -210,10 +210,6 @@ fn errors_take_python_classes() {
         ),
         other => panic!("{other:?}"),
     }
-    assert!(!py_exists(&at("missing.txt")).unwrap());
-    assert!(!py_exists(&at("folder.data/inside")).unwrap() || cfg!(windows));
-    assert!(!py_exists("nul\0byte").unwrap());
-    assert!(py_exists(&at("folder.txt")).unwrap());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -308,4 +304,57 @@ fn similarity_clamps_like_python_max() {
     assert_eq!(similarity(1.5), 0.0);
     assert_eq!(similarity(f64::NAN), 0.0);
     assert!(similarity(1.0).is_sign_positive());
+}
+
+// The read takes the resolved path (`document_roots::admit`): a link put
+// in its place afterwards is refused, not followed.
+#[cfg(unix)]
+#[test]
+fn the_read_never_follows_a_link_in_place_of_the_file() {
+    let dir = std::env::temp_dir().join(format!(
+        "pl-documents-nofollow-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("real.txt"), b"text").unwrap();
+    std::os::unix::fs::symlink(dir.join("real.txt"), dir.join("link.txt")).unwrap();
+    let at = |n: &str| dir.join(n).to_str().unwrap().to_string();
+    assert_eq!(read_document_bytes(&at("real.txt"), 1024).unwrap(), b"text");
+    match read_document_bytes(&at("link.txt"), 1024) {
+        Err(ReadError::Io(e)) => assert_eq!(e.raw_os_error(), Some(libc::ELOOP), "{e}"),
+        other => panic!("{other:?}"),
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// A file inside a documents directory the daemon may not read is named as
+// such, with the fix, whatever branch reads it.
+#[cfg(unix)]
+#[test]
+fn an_unreadable_file_is_named_with_its_fix() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!(
+        "pl-documents-unreadable-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    for name in ["locked.txt", "locked.data"] {
+        let path = dir.join(name);
+        std::fs::write(&path, b"text").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&path).is_ok() {
+            eprintln!("skipped: this account reads any file (root)");
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        match extract_text(path.to_str().unwrap(), name) {
+            Err(ToolError::Invalid(m)) => {
+                assert!(m.starts_with("document_unreadable: "), "{name}: {m}")
+            }
+            other => panic!("{name}: {other:?}"),
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }

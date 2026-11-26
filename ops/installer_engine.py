@@ -41,6 +41,10 @@ OVERLAY = "docker-compose.engine-installer.yml"
 PROJECT = "pseudolife-mcp"
 MODELS_VOLUME = "pseudolife_rust_models"
 MODELS_DIR = "/models"
+# The documents folder ``document_ingest`` reads from, as the release
+# overlay mounts it (Compose resolves ``~`` to the home of whoever runs it).
+DOCUMENTS_MOUNT = "~/.pseudolife-mcp/documents:/documents:ro"
+DOCUMENTS_ROOTS = "/documents"
 
 
 class Refusal(Exception):
@@ -157,14 +161,17 @@ def overlay_path() -> Path:
 def write_overlay(service: dict) -> Path:
     """A YAML daemon overlay: JSON strings are YAML scalars; ``!reset`` drops the build.
 
-    The models volume matches ``docker-compose.rust-ghcr.yml``, which later
-    release updates apply, so both keep the models outside the backed-up /data.
+    The models volume and the documents folder match
+    ``docker-compose.rust-ghcr.yml``, which later release updates apply, so
+    both keep the models outside the backed-up /data.
     """
     lines = ["# Written by the installer from the accepted engine selection; rerunning rewrites it.",
              "services:", f"  {up.DAEMON_SERVICE}:", f"    image: {json.dumps(service['image'])}",
              "    build: !reset null",
              "    environment:", f"      PSEUDOLIFE_DAEMON_MODELS_DIR: {json.dumps(MODELS_DIR)}",
+             f"      PSEUDOLIFE_DAEMON_DOCUMENT_ROOTS: {json.dumps(DOCUMENTS_ROOTS)}",
              "    volumes:", f"      - {json.dumps(MODELS_VOLUME + ':' + MODELS_DIR)}",
+             f"      - {json.dumps(DOCUMENTS_MOUNT)}",
              "    labels:"]
     lines += [f"      {json.dumps(key)}: {json.dumps(value)}" for key, value in sorted(service["labels"].items())]
     lines += ["volumes:", f"  {MODELS_VOLUME}: {{}}"]
@@ -176,6 +183,36 @@ def write_overlay(service: dict) -> Path:
         temporary.write_text(body, encoding="utf-8")
         temporary.replace(path)
     return path
+
+
+def documents_folder() -> None:
+    """Create the documents folder the overlay mounts, once: ``0755`` so the
+    container's daemon account can read it, inside an owner-only parent when
+    this creates that too; an existing folder is left as it is."""
+    import os
+    folder = Path.home() / ".pseudolife-mcp" / "documents"
+    if folder.is_dir():
+        # Docker creates a missing bind source as root (an older updater
+        # leaves it so): say how to take it back.
+        if os.name != "nt" and folder.stat().st_uid != os.geteuid():
+            print(f"WARNING: {folder} belongs to another account (uid {folder.stat().st_uid}), so you "
+                  f"cannot copy documents into it; run sudo chown {os.geteuid()} {folder} once.",
+                  file=sys.stderr)
+        return
+    if folder.exists():
+        raise Refusal(f"{folder} exists but is not a folder; move it aside and rerun. Nothing was started.")
+    if not folder.parent.exists():
+        folder.parent.mkdir(parents=True, mode=0o700)
+        if os.name != "nt":
+            folder.parent.chmod(0o700)
+    folder.mkdir(mode=0o755)
+    if os.name != "nt":
+        folder.chmod(0o755)
+        if folder.parent.stat().st_mode & 0o077:
+            print(f"WARNING: {folder.parent} lets other users of this machine in, so they can read the "
+                  f"documents folder too; run chmod 700 {folder.parent} to keep it to you.", file=sys.stderr)
+    print(f"Created the documents folder {folder}: document_ingest reads files copied there as "
+          "/documents/<name>.", file=sys.stderr)
 
 
 def read_overlay() -> dict:
@@ -264,6 +301,7 @@ def prepare(repo: Path, engine: str, default: bool = False) -> list[Path]:
     found = labels()
     kept = accepted_release() if found is None else accepted(found)
     if kept is not None:
+        documents_folder()
         return [write_overlay({"image": kept["image"], "labels": kept["labels"]})]
     try:
         version = checkout_version(repo)
@@ -279,6 +317,7 @@ def prepare(repo: Path, engine: str, default: bool = False) -> list[Path]:
         print(f"{cause}. The default Rust daemon is unavailable, so this install uses the Python daemon.",
               file=sys.stderr)
         return []
+    documents_folder()
     return [write_overlay({"image": image, "labels": {eng.ENGINE_LABEL: "rust", eng.ACTIVATION_LABEL: secrets.token_hex(16),
                                                       eng.RELEASE_LABEL: version}})]
 

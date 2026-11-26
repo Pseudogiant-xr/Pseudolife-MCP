@@ -2,6 +2,7 @@
 mod backup;
 pub(super) mod clients;
 pub(crate) mod disk;
+pub(crate) mod documents;
 pub(crate) mod engine;
 mod full_handoff;
 mod options;
