@@ -300,7 +300,9 @@ owners while the endpoint wiring keeps its owner.
 
 *Via env:* for the Docker stack, set the override in `ops/.env` (the
 compose file interpolates it into the daemon) and recreate the daemon
-(`pseudolife-mcp update --reinstall --daemon-only --tag <the running version>`):
+(`pseudolife-mcp update --reinstall --daemon-only --tag <the running version>`
+on a release install; a checkout deploy reruns `ops/update.sh` or
+`ops/update.ps1`):
 
 ```dotenv
 # ops/.env — point dream consolidation at a local model server.

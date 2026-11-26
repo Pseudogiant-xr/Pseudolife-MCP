@@ -10,7 +10,8 @@ tools.
 
 1. Fetch `http://127.0.0.1:8765/health` (curl or WebFetch). If it fails,
    report that the daemon is down and how to start it:
-   `docker start pseudolife-mcp-postgres pseudolife-mcp-daemon`
+   `docker start pseudolife-mcp-postgres pseudolife-mcp-daemon`, adding
+   `pseudolife-mcp-extractor` when that container exists (the extractor sidecar)
    (install guide: https://github.com/Pseudogiant-xr/Pseudolife-MCP#quickstart).
 2. Call `memory_stats()` and summarize: `total_memories`, store occupancy
    as a capacity meter (`bands[0].size` / `capacity` under the default
