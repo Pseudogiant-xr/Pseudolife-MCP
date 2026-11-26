@@ -613,8 +613,8 @@ jobs:
     # The time to finish that head is still unknown. Allow 10 minutes
     # beyond the old cutoff for the run, including pytest's 600s
     # faulthandler dump if a test hangs late.
-    # 2026-11-26 (rust/ci/ci_headroom.py's survey of every attempt,
-    # 2026-11-12..26): the slowest successful run took 36.4 min (0.26.0 cut
+    # 2026-11-26 (every attempt of ci.yml runs created 2026-11-12..26): the
+    # slowest successful run took 36.4 min (0.26.0 cut
     # batch run 45747873168, job 139668302769), 91% of 40, and 30 attempts
     # took 32 or more; 51 is about 40% over the slowest.
     timeout-minutes: 51
