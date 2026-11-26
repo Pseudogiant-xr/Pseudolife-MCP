@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test",
+  "before": "492e9b9ddbe2b98f",
+  "fingerprint": "8927fe81c3135280",
+  "reason": "Raises timeout-minutes from 65 to 87 to fit ops/ci_tests.sh's pytest bound for a frozen-inclusive run, raised from 50 to 72 minutes because that suite takes about 51 minutes on an AMD EPYC 7763 runner (runs 45512966117 and 45747873168); the live-files bound stays 50. The steps run the same tests, so the budgeted live-files run costs what it did. A frozen-inclusive run (a release cut, a freeze exception, the weekly nightly) on a slow CPU now finishes in about 51 minutes instead of being killed at 50 and rerun, and a hung one can use up to 22 more minutes before its bound ends it."
+}

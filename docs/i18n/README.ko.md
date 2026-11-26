@@ -1,8 +1,8 @@
-<!-- i18n-sync: v14 -->
+<!-- i18n-sync: v15 -->
 
 # Pseudolife-MCP
 
-[영어 원본 README](../../README.md)와 동기화된 버전: v14 (2026-11-26)
+[영어 원본 README](../../README.md)와 동기화된 버전: v15 (2026-11-26)
 
 **Claude Code, Codex, 그리고 그 밖의 MCP 클라이언트를 위한 영구적인 장기 메모리.**
 
@@ -42,36 +42,19 @@ ops\install.ps1         # Windows (pwsh 7+)
 
 무엇을 묻고 무엇을 구성하는지는 아래 "영구 보존 티어" 절에 있습니다.
 
-대신 lite 티어(Python 패키지이므로 호스트에 Python이 필요합니다)를 써 보려면
-명령 두 줄이면 충분합니다. Docker도, 따로 구성할 데이터베이스도, 컨테이너
-런타임도 필요 없습니다:
-
-```bash
-pip install "pseudolife-mcp[lite]"
-claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
-```
-
-Claude Code 대신 Codex를 쓴다면 — 형태는 동일합니다:
-
-```bash
-pip install "pseudolife-mcp[lite]"
-codex mcp add pseudolife-memory -- pseudolife-mcp
-```
-
-이후 두 코딩 에이전트 중 어느 쪽에서든 *"내 스테이징 박스는 haze-02라고
+이후 코딩 에이전트에서 *"내 스테이징 박스는 haze-02라고
 기억해줘"*라고 말하면 — 며칠 후 새 세션에서 *"스테이징 박스가 뭐였지?"*라고
 물었을 때 메모리에서 답을 가져옵니다. Cortex Console
 (`http://127.0.0.1:8765/ui/`)에서 모든 내용을 둘러볼 수 있습니다.
 
-첫 세션에서 데몬이 자동으로 시작되며, 내장형 PostgreSQL을 프로비저닝하고
-임베딩 모델을 내려받습니다 — 이는 일회성 단계입니다. Lite 구성에는 드림
-추출기(extractor)가 포함되어 있지 않아 정규화된 사실이 저절로 생성되지
-않습니다: 이 경로에서는 OpenAI 호환 엔드포인트가 설정되기 전까지
-`memory_fact_set`만이 유일한 코텍스(cortex) 기록자입니다.
+lite 티어(내장형 PostgreSQL 뱅크를 쓰고 Docker가 필요 없는 pip 패키지)는
+폐지되었으며, 설치 스크립트는 lite 뱅크가 남아 있는 머신을 거부합니다. 먼저
+[lite 뱅크를 Docker로 옮기기](../guide/configuration.md#move-a-lite-bank-to-docker)로
+그 뱅크를 옮기세요. 멈춘 뱅크를 백업한 뒤 새 Docker 뱅크로 복원합니다.
 
 ### 영구 보존 티어 — Docker
 
-장기간 운영되는 뱅크(bank)를 원한다면: 위 내용 전체에 더해 번들 추출기, 외부
+장기간 운영되는 뱅크(bank)를 원한다면: 번들 추출기, 외부
 볼륨, 상태 점검이 적용된 서비스, 백업/롤백 도구가 포함됩니다. Docker와
 MCP를 지원하는 코딩 에이전트가 최소 하나 필요합니다 — Claude Code, Codex,
 Gemini CLI는 엔드투엔드로 연결되어 있으며, 그 외의 에이전트에는 바로

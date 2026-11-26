@@ -1,8 +1,8 @@
-<!-- i18n-sync: v14 -->
+<!-- i18n-sync: v15 -->
 
 # Pseudolife-MCP
 
-> Traducción del [README](../../README.md) canónico — sincronizado: v14 (2026-11-26)
+> Traducción del [README](../../README.md) canónico — sincronizado: v15 (2026-11-26)
 
 **Memoria persistente a largo plazo para Claude Code, Codex y otros clientes MCP.**
 
@@ -47,38 +47,22 @@ ops\install.ps1         # Windows (pwsh 7+)
 
 Lo que pregunta y lo que prepara está en la sección Nivel duradero, más abajo.
 
-Para probar en su lugar el nivel lite (el paquete de Python, que por tanto
-necesita Python en el host), dos comandos. Sin Docker, sin base de datos que
-configurar, sin runtime de contenedores:
-
-```bash
-pip install "pseudolife-mcp[lite]"
-claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
-```
-
-Codex en lugar de Claude Code — misma forma:
-
-```bash
-pip install "pseudolife-mcp[lite]"
-codex mcp add pseudolife-memory -- pseudolife-mcp
-```
-
-Luego, en cualquiera de los dos agentes de codificación: *"recuerda que mi
+Luego, en tu agente de codificación: *"recuerda que mi
 servidor de staging es haze-02"* — y en una sesión nueva, días después,
 *"¿cuál es el servidor de staging?"* obtiene la respuesta de vuelta desde
 la memoria. Explora todo en la Cortex Console en
 `http://127.0.0.1:8765/ui/`.
 
-La primera sesión inicia automáticamente el daemon, que aprovisiona un
-PostgreSQL embebido y descarga el modelo de embeddings — un paso único.
-Lite no incluye ningún **extractor** de sueños, así que los hechos
-canónicos no aparecen por sí solos: en esta vía, `memory_fact_set` es el
-único escritor del **cortex**, hasta que se configure un endpoint
-compatible con OpenAI.
+El nivel lite (el paquete pip con un banco PostgreSQL embebido y sin
+Docker) está retirado, y el instalador rechaza una máquina que aún tenga un
+banco lite. Mueve antes ese banco con
+[Mover un banco lite a Docker](../guide/configuration.md#move-a-lite-bank-to-docker):
+hace una copia de seguridad del banco detenido y lo restaura en el nuevo
+banco Docker.
 
 ### Nivel duradero — Docker
 
-Para un banco duradero: todo lo anterior, más el extractor incluido,
+Para un banco duradero: el extractor incluido,
 volúmenes externos, servicios con verificación de salud, y herramientas de
 respaldo y reversión. Requiere Docker y al menos un agente de codificación
 compatible con MCP — Claude Code, Codex y Gemini CLI están integrados de

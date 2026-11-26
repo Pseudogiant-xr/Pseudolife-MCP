@@ -5,7 +5,7 @@
 //! separate `pseudolife-daemon` binary in the Docker tier).
 //!
 //! Every command that finds a lite bank refuses with [`lite_bank_refusal`],
-//! so the wording is one sentence from one place. The test for a lite bank is
+//! so the wording comes from one place. The test for a lite bank is
 //! the exact signal the lite tier itself wrote, `embedded_pg/PG_VERSION` as a
 //! file: the lite default directory alone is not one, because the native
 //! client installs its own runtimes there too.
@@ -15,6 +15,10 @@ use std::path::{Path, PathBuf};
 /// section and the installers name it.
 pub const DOCKER_INSTALL: &str =
     "install the Docker tier with ops/install.sh (Linux, macOS) or ops\\install.ps1 (Windows)";
+/// Where the move of a lite bank to the Docker tier is written down: the
+/// configuration guide's "Move a lite bank to Docker", which also names the
+/// pip release that still opens the bank.
+pub const MOVE_GUIDE: &str = "https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/master/docs/guide/configuration.md#move-a-lite-bank-to-docker";
 /// How a stopped Docker-tier daemon is started.
 pub const DOCKER_START: &str = "docker compose -f ops/docker-compose.yml up -d";
 
@@ -78,7 +82,7 @@ pub fn find_lite_bank(explicit: Option<&Path>) -> Option<PathBuf> {
 /// status its other refusals use.
 pub fn lite_bank_refusal(data_dir: &Path) -> String {
     format!(
-        "{} holds a lite-tier bank (embedded PostgreSQL), and the lite tier is retired, so this client does not open it. Move the bank to the Docker tier with the pip release (pseudolife-mcp 0.23.x), which still opens it: follow \"Move a lite bank to Docker\" in docs/guide/configuration.md, which backs the stopped bank up first and then has you {DOCKER_INSTALL}.",
+        "{} holds a lite-tier bank (embedded PostgreSQL). The lite tier is retired, so this client does not open it. Next step: move the bank to the Docker tier with \"Move a lite bank to Docker\" ({MOVE_GUIDE}), which backs the stopped bank up with the pip release that still opens it and then has you {DOCKER_INSTALL}.",
         data_dir.display()
     )
 }
@@ -146,11 +150,31 @@ mod tests {
         // The move is the guide's order: back up with the release that still
         // opens the bank, then install the Docker tier.
         let refusal = lite_bank_refusal(dir);
-        assert!(refusal.contains("pseudolife-mcp 0.23.x"), "{refusal}");
         assert!(
-            refusal.find("backs the stopped bank up first").unwrap()
+            refusal.find("backs the stopped bank up").unwrap()
                 < refusal.find(DOCKER_INSTALL).unwrap(),
             "{refusal}"
         );
+    }
+
+    #[test]
+    fn the_lite_refusal_says_lite_is_retired_and_names_the_move_as_the_one_next_step() {
+        let refusal = lite_bank_refusal(Path::new("bank"));
+        assert!(
+            refusal.contains(". The lite tier is retired, so this client does not open it."),
+            "{refusal}"
+        );
+        // The one next step is the move, named where a reader without a
+        // checkout can open it too.
+        let next = refusal
+            .find("Next step: move the bank to the Docker tier")
+            .expect(&refusal);
+        assert!(refusal.contains(MOVE_GUIDE), "{refusal}");
+        assert!(MOVE_GUIDE.ends_with("docs/guide/configuration.md#move-a-lite-bank-to-docker"));
+        // The pip release is part of the move the guide describes, never a
+        // route offered before it: which release opens a lite bank is the
+        // guide's to say.
+        assert!(!refusal[..next].contains("pip"), "{refusal}");
+        assert!(!refusal.contains("0.23"), "{refusal}");
     }
 }

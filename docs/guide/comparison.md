@@ -185,11 +185,12 @@ Point `PSEUDOLIFE_DREAM_BASE_URL` at a hosted model and you have traded the
 property away deliberately — that is a supported configuration, and
 [Dreaming](dreaming.md) says so where you make the choice.
 
-Two honest caveats. First, the **lite** tier ships *no* extractor at all
-(`pip install "pseudolife-mcp[lite]"`) — no memory content leaves it by
-default, because nothing extracts anything until you point it at an
-endpoint (the same release check applies, and the same switch turns it
-off); see the README's quickstart for exactly what that costs you. Second, the agent
+Two honest caveats. First, a bank with no extractor configured (the retired
+**lite** tier shipped none) sends no memory content to any extraction
+endpoint, because nothing extracts anything until you point it at one (the
+same release check applies, and the same switch turns it off); its
+PostgreSQL still receives every memory, wherever that database runs.
+[Dreaming](dreaming.md) says exactly what no extractor costs you. Second, the agent
 calling these tools is usually a hosted model, so "no egress" describes
 this server's behaviour, not your whole stack.
 

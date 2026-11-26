@@ -545,9 +545,9 @@ upgrade the client or configure that entry manually before using the shim.
    reconnect after recovery to receive the startup guidance.
 3. Run that interpreter with `-m pip check` and `-m pip show pseudolife-mcp mcp`.
    For a stale published installation, use that interpreter's
-   `-m pip install --upgrade "pseudolife-mcp[lite]"`; for a source checkout,
+   `-m pip install --upgrade pseudolife-mcp`; for a source checkout,
    reinstall the intended checkout with `-m pip install -e .` to refresh
-   dependencies and editable metadata. Docker shim-only hosts omit `[lite]`.
+   dependencies and editable metadata.
    On Windows, run either with every session using that shim closed
    (Claude Desktop fully quit from the tray), or it can leave the shim
    half-removed.
@@ -668,9 +668,8 @@ and fact writes round-tripped, writes attributed as writer `antigravity`.
 
 `PSEUDOLIFE_MCP_NO_SPAWN=1` belongs on Docker-tier shim registrations
 (every provider): it makes the shim wait for the compose container instead
-of spawning a host fallback that can shadow the real bank after a reboot —
-drop it only on the `[lite]` pip tier, where the spawn fallback is the
-zero-config path. Gemini CLI has no
+of spawning a host fallback that can shadow the real bank after a reboot.
+Gemini CLI has no
 hook system that can inject session context, so the standing file supplies
 the policy: the installer offers to append the block to `~/.gemini/GEMINI.md`
 (Gemini's default context file on a stock install; it also reads
