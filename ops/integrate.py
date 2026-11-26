@@ -3662,7 +3662,7 @@ def _carried_open_prs(plan: Plan, base_sha: str) -> dict[int, list[int]]:
 def _expected_members(text: str) -> frozenset[int]:
     """`--expect 2012,2009`: the pull request numbers a build must admit."""
     parts = [part.strip().removeprefix("#") for part in text.split(",")]
-    if not text.strip() or not all(re.fullmatch(r"[1-9][0-9]*", part) for part in parts):
+    if not all(re.fullmatch(r"[1-9][0-9]*", part) for part in parts):
         raise argparse.ArgumentTypeError(
             f"expected comma-separated pull request numbers such as 2012,2009, not {text!r}")
     return frozenset(int(part) for part in parts)

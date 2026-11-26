@@ -2631,14 +2631,16 @@ def test_build_expect_builds_exactly_the_named_members(world, capsys):
     assert [m.number for m in integrate.Plan.load(f"integrate/{DATE}-batch-1").merged] == [10, 12]
 
 
-def _refused_and_nothing_built(world, capsys, *extra) -> str:
+def _refused_and_nothing_built(world, capsys, *extra, merged_nothing=False) -> str:
     master = _git(world.work, "rev-parse", "origin/master")
     assert _build(*extra) == 2
-    err = capsys.readouterr().err
+    out, err = capsys.readouterr()
     assert "nothing was built" in err
     assert _integrate_branches(world) == [] and world.remote_branches() == []
     assert world.gh.mutations() == []
     assert _git(world.work, "rev-parse", "HEAD") == master
+    if merged_nothing:          # refused before any merge was tried
+        assert "building integrate/" not in out and "#11" not in out, out
     return err
 
 
@@ -2661,10 +2663,9 @@ def test_build_expect_stops_when_an_unnamed_member_is_admitted(world, capsys):
 def test_build_expect_stops_before_merging_when_a_named_member_is_not_ready(world, capsys):
     _three_with_a_collision(world)
     world.gh.add(13, world.pr(13, {"e.txt": "e\n"}), isDraft=True)
-    err = _refused_and_nothing_built(world, capsys, "--expect", "10,12,13,99")
+    err = _refused_and_nothing_built(world, capsys, "--expect", "10,12,13,99", merged_nothing=True)
     assert "#13 is left out: is a draft" in err
     assert "#99 is left out: it is not an open pull request on master carrying `ready-to-batch`" in err
-    assert "dropped #11" not in capsys.readouterr().out
 
 
 def test_build_expect_refuses_where_no_ready_member_would_return_zero(world, capsys):
