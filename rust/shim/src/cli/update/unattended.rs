@@ -422,6 +422,19 @@ fn run_inner(
             update.step(format!("held off: {error}"));
             return Ok(4);
         }
+        // A Python host already at the newest release still has to move: the
+        // Python daemon is retired, so the run holds for an attended update
+        // instead of reporting nothing to do (an unreadable host is left out).
+        let labels = super::engine::host_labels(update, super::DAEMON_CONTAINER);
+        if labels.as_object().is_some_and(|map| !map.is_empty())
+            && labels[super::engine::ENGINE_LABEL].as_str() != Some("rust")
+        {
+            return Ok(attended_hold(
+                update,
+                Some(&latest),
+                super::release::PYTHON_RETIRED_HOLD,
+            ));
+        }
         update.step(format!(
             "current: {current} is the newest release; nothing to do"
         ));

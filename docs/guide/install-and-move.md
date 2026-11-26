@@ -30,17 +30,25 @@ models it refuses, names `--engine python`, and starts nothing; for a bank
 that already exists it installs on Python and then switches through update
 (below).
 
-A release-mode `pseudolife-mcp update` moves a Docker host that never
-chose an engine to the Rust daemon when the target release publishes its
-image. An ordinary update can move the host from a script, an SSH command
-or an agent's shell too. Before it downloads the models or backs
-anything up, the update asks the Rust image whether it supports this bank's configuration (`pseudolife-daemon
-check-config`: a non-default reranker or embedding model, for instance, is
-not). If that check, or anything else before the backup, refuses, the update
-removes what it pulled for the move, warns with the refusal and its fix,
-and continues on Python; nothing is recorded, so the next update tries
-again. `--engine python` keeps Python for good, and `--engine rust` refuses
-an unsupported configuration before the backup instead of falling back.
+A release-mode `pseudolife-mcp update` moves a Docker host still on the
+Python daemon to the Rust daemon: the Python daemon is retired and gets no
+more fixes, so no release update keeps it, whatever an earlier
+`--engine python` recorded. An ordinary update makes the move from a
+script, an SSH command or an agent's shell too. Before it downloads the
+models or backs anything up, the update asks the Rust image whether it
+supports this bank's configuration (`pseudolife-daemon check-config`: a
+non-default reranker or embedding model, for instance, is not). If that
+check, or anything else before the backup, refuses, the update removes what
+it pulled for the move and stops with the refusal and its fix; the Python
+daemon keeps running as it was, and the next update tries again once the
+cause is fixed. A release that publishes no Rust image is refused the same
+way. The scheduled `--unattended` update does not make the move: on a
+Python host it holds and asks for one attended `pseudolife-mcp update`.
+`--no-backup` is refused on a Python host, and `--engine python` is refused
+in release mode (a checkout deploy still takes it). The one run that stays
+on Python is the explicit bearer handover (`--allow-auth-change`): the move
+needs a bearer, so a Python daemon that runs without one first gets it that
+way, and the next attended update moves the host.
 The updater that deploys the daemon is the one already installed, so an
 update started from a release older than 0.23.0 installs the new release
 on the Python daemon. The next attended `pseudolife-mcp update` can move

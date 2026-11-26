@@ -186,6 +186,14 @@ impl Options {
         {
             return Err(UpdateError::usage("--engine must be python or rust"));
         }
+        // The Python daemon is retired (maintainer, 27 November 2026): a
+        // release update keeps or moves a host to Rust. A checkout deploy, a
+        // contributor tool, still builds either engine.
+        if self.engine.as_deref() == Some("python") && self.checkout.is_none() {
+            return Err(UpdateError::usage(
+                "--engine python is retired for release updates: the Python daemon gets no more fixes, so pseudolife-mcp update keeps or moves this host to the Rust daemon. Drop --engine python (a checkout deploy still takes --engine python --checkout <repo>). Nothing was changed",
+            ));
+        }
         if self.shadow && (self.engine.is_none() || self.checkout.is_none()) {
             return Err(UpdateError::usage(
                 "--shadow requires --engine rust --checkout <repo> to start, or --engine python --checkout <repo> to remove; nothing was changed",
