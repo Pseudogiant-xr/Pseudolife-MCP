@@ -229,6 +229,42 @@ def test_skipped_replay_uses_job_verdict_for_tolerated_setup_failure(integrate, 
     assert integrate._snapshot_state(SHA, rollup, True)[0] == state
 
 
+# The files the base's CI scope verdict is read from (ops/integrate.py
+# DOCS_SCOPE_FILES), as the frozen base carries them.
+SCOPE_FILES = ("rust/ci/docs_scope.py", "rust/ci/parity_scope.py", "ops/ci_batch_passed.py",
+               "rust/producer_census.py")
+
+
+def _raw_diff(files, mode="100644"):
+    return "".join(f":{mode} {mode} {'0' * 40} {'1' * 40} M\0{path}\0" for path in files)
+
+
+def _frozen_base(tmp_path, files, *, mode="100644", ci_scope=True):
+    """Serve the base's selector and CI scope through `_out`, with member
+    copies of both in the checkout that raise if anything imports them."""
+    base = {path: (ROOT / path).read_text(encoding="utf-8")
+            for path in (*SCOPE_FILES, "rust/ci/pr_precheck.py")}
+    (tmp_path / "rust/ci").mkdir(parents=True)
+    marker = tmp_path / "executed"
+    for path in ("rust/ci/pr_precheck.py", "rust/ci/docs_scope.py"):
+        (tmp_path / path).write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).touch()\nraise RuntimeError('member code')\n")
+    (tmp_path / "rust/probe.py").write_text("from tests import test_runtime_seed\n")
+
+    def out(*args):
+        if args[0] == "ls-tree":
+            return f"100644 blob {args[-1]}" if ci_scope or args[-1] != "rust/ci/docs_scope.py" else ""
+        if args[0] == "rev-parse":
+            return str(tmp_path)
+        if args[0] == "diff":
+            assert args[1:4] == ("--raw", "-z", "--no-renames"), args
+            return _raw_diff(files, mode)
+        assert args[0] == "show"
+        return base[args[1].split(":", 1)[1]]
+
+    return out, marker
+
+
 @pytest.mark.parametrize("files,required", [
     (["docs/guide.md"], False), (["tests/test_feature.py"], False),
     (["docs/guide.md", "tests/test_feature.py", "changelog.d/note.md"], False),
@@ -239,27 +275,15 @@ def test_skipped_replay_uses_job_verdict_for_tolerated_setup_failure(integrate, 
     (["docs/guide.md", "rust/producer-census.json", "pseudolife_memory/doctor_cli.py"], True),
     (["pseudolife_memory/doctor_cli.py"], True), (["rust/shim/src/main.rs"], True),
     (["tests/test_runtime_seed.py"], True),
+    # CI's scope skips the Rust lanes of Markdown under evals/ (#1992, #2010),
+    # so admission waits for no replay there; prompts and code still need it.
+    (["evals/README.md"], False), (["evals/RUST-DRIVERS.md", "llms-full.txt"], False),
+    (["evals/prompts/extract.md"], True), (["evals/README.md", "rust/shim/src/main.rs"], True),
+    (["evals/README.md", "evals/harness.py"], True),
 ])
 def test_requirement_uses_frozen_selector_without_importing_member_code(
         integrate, monkeypatch, tmp_path, files, required):
-    scope = (ROOT / "rust/ci/parity_scope.py").read_text(encoding="utf-8")
-    selector = (ROOT / "rust/ci/pr_precheck.py").read_text(encoding="utf-8")
-    (tmp_path / "rust/ci").mkdir(parents=True)
-    marker = tmp_path / "executed"
-    (tmp_path / "rust/ci/pr_precheck.py").write_text(
-        f"from pathlib import Path\nPath({str(marker)!r}).touch()\nraise RuntimeError('member code')\n")
-    (tmp_path / "rust/probe.py").write_text("from tests import test_runtime_seed\n")
-
-    def out(*args):
-        if args[0] == "ls-tree":
-            return "100644 blob selector"
-        if args[0] == "rev-parse":
-            return str(tmp_path)
-        if args[0] == "diff":
-            return "\n".join(files)
-        assert args[0] == "show"
-        return selector if args[1].endswith("pr_precheck.py") else scope
-
+    out, marker = _frozen_base(tmp_path, files)
     monkeypatch.setattr(integrate, "_out", out)
     monkeypatch.setattr(integrate, "git", lambda *args, **kwargs:
                         SimpleNamespace(returncode=0, stdout="merged-tree\n"))
@@ -269,6 +293,58 @@ def test_requirement_uses_frozen_selector_without_importing_member_code(
     value.snapshot, value.snapshot_why = integrate._snapshot_state(SHA, [], required)
     assert (integrate._not_ready(value) is None) is (not required)
     assert not marker.exists()
+
+
+@pytest.mark.parametrize("files", [["evals/README.md"], ["evals/RUST-DRIVERS.md", "llms-full.txt"]])
+def test_requirement_agrees_with_the_ci_scope_verdict(integrate, monkeypatch, tmp_path, files):
+    # Admission and the scope job call one predicate: whatever the Rust
+    # workflow skips for a pull request, admission does not demand.
+    from rust.ci import docs_scope
+
+    assert docs_scope.pull_request_skips_rust(files, True) is True
+    out, _ = _frozen_base(tmp_path, files)
+    monkeypatch.setattr(integrate, "_out", out)
+    monkeypatch.setattr(integrate, "git", lambda *args, **kwargs:
+                        SimpleNamespace(returncode=0, stdout="merged-tree\n"))
+    monkeypatch.setattr(integrate, "_fetch_head", lambda number: SHA)
+    skipped = [{"name": "Scope", "status": "COMPLETED", "conclusion": "SUCCESS"},
+               {"name": "Rust / ${{ matrix.os }}", "status": "COMPLETED", "conclusion": "SKIPPED"}]
+    assert integrate._snapshot_requirement(member(integrate), "base") == (False, "")
+    assert integrate._snapshot_requirement(member(integrate), "base", skipped) == (False, "")
+    # When the scope job's docs test selection fails, it runs the Rust lanes
+    # for these paths after all, and then their replay is the evidence.
+    ran = skipped[:1] + [{"name": name, "status": "IN_PROGRESS"} for name in JOBS]
+    assert integrate._snapshot_requirement(member(integrate), "base", ran) == (True, "")
+    near_miss = skipped + [{"__typename": "StatusContext", "context": JOBS[0], "name": JOBS[0]}]
+    assert integrate._snapshot_requirement(member(integrate), "base", near_miss) == (False, "")
+
+
+@pytest.mark.parametrize("mode,ci_scope", [("120000", True), ("160000", True), ("100644", False)])
+def test_requirement_keeps_the_replay_ci_scope_would_run(integrate, monkeypatch, tmp_path, mode, ci_scope):
+    # A symlink or gitlink under a docs name runs the Rust lanes in CI, and
+    # a base without the shared scope verdict skips nothing.
+    out, _ = _frozen_base(tmp_path, ["evals/README.md"], mode=mode, ci_scope=ci_scope)
+    monkeypatch.setattr(integrate, "_out", out)
+    monkeypatch.setattr(integrate, "git", lambda *args, **kwargs:
+                        SimpleNamespace(returncode=0, stdout="merged-tree\n"))
+    monkeypatch.setattr(integrate, "_fetch_head", lambda number: SHA)
+    assert integrate._snapshot_requirement(member(integrate), "base") == (True, "")
+
+
+@pytest.mark.parametrize("scope", ["SUCCESS", "FAILURE", "CANCELLED"])
+def test_code_pr_whose_rust_lanes_were_skipped_is_still_refused(integrate, scope):
+    # A run cancelled after its scope (or a failed scope) reports the Rust job
+    # unexpanded and SKIPPED, the way a docs-only skip does. For a head whose
+    # paths need the replay that is no evidence, so it stays out.
+    rollup = [{"name": "Scope", "status": "COMPLETED", "conclusion": scope, "workflowName": "Rust shim",
+               "detailsUrl": "https://github.com/o/r/actions/runs/9/job/1"},
+              {"name": "Rust / ${{ matrix.os }}", "status": "COMPLETED", "conclusion": "SKIPPED",
+               "workflowName": "Rust shim", "detailsUrl": "https://github.com/o/r/actions/runs/9/job/2"}]
+    state, why = integrate._snapshot_state(SHA, rollup, True)
+    assert state == "pending"
+    value = member(integrate, state)
+    value.snapshot_why = why
+    assert "own-head snapshot replay is pending" in integrate._not_ready(value)
 
 
 def test_head_moves_during_requirement_read(integrate, monkeypatch):
@@ -384,7 +460,7 @@ def test_bootstrap_rechecks_admission_instead_of_bypassing_it(
     monkeypatch.setattr(integrate, "_has_snapshot_selector", lambda base: True)
     monkeypatch.setattr(integrate, "_base_has_snapshot_admission", lambda base: False)
     computed = []
-    def requirement(value, base):
+    def requirement(value, base, rollup=None):
         computed.append((value.number, base))
         return required, "selector unavailable" if required is None else ""
     monkeypatch.setattr(integrate, "_snapshot_requirement", requirement)
@@ -419,7 +495,7 @@ def test_bootstrap_computes_each_member(integrate, actions, monkeypatch):
     monkeypatch.setattr(integrate, "_has_snapshot_selector", lambda base: True)
     monkeypatch.setattr(integrate, "_base_has_snapshot_admission", lambda base: False)
     computed = []
-    def requirement(value, base):
+    def requirement(value, base, rollup=None):
         computed.append(value.number)
         return value.number == 123, ""
     monkeypatch.setattr(integrate, "_snapshot_requirement", requirement)

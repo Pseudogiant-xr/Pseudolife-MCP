@@ -459,7 +459,10 @@ SNAPSHOT_STEP = "Replay touched PR goldens"
 SNAPSHOT_SELECTOR = "rust/ci/pr_precheck.py"
 
 # Execute only the frozen base's selector code in an isolated interpreter;
-# the checkout's Python files are inputs read as text, never imported.
+# the checkout's Python files are inputs read as text, never imported. CI's
+# scope verdict comes from the base's own rust/ci/docs_scope.py, copied with
+# what it imports (DOCS_SCOPE_FILES) to a temporary directory; a base
+# without its pull_request_skips_rust skips nothing.
 _SNAPSHOT_INPUTS = """import json, pathlib, sys, types
 data = json.load(sys.stdin)
 root = pathlib.Path(data['root'])
@@ -471,10 +474,36 @@ selector = types.ModuleType('snapshot_selector')
 selector.__file__ = str(root / 'rust/ci/pr_precheck.py')
 exec(compile(data['selector'], selector.__file__, 'exec'), selector.__dict__)
 files = data['files']
-docs_only = any(scope.is_docs(path) for path in files) and all(
-    scope.is_docs(path) or path == 'rust/producer-census.json' for path in files)
-print(json.dumps(not docs_only and any(selector.rows_for(path, {}) for path in files)))
+skipped = False
+if data['ci_scope']:
+    sys.path.insert(0, data['ci_scope'])
+    from rust.ci import docs_scope
+    verdict = getattr(docs_scope, 'pull_request_skips_rust', None)
+    skipped = verdict is not None and verdict(files, data['regular']) is True
+print(json.dumps([any(selector.rows_for(path, {}) for path in files), skipped]))
 """
+REGULAR_MODES = frozenset({"000000", "100644", "100755"})
+
+
+def _net_diff(base: str, tree: str) -> tuple[list[str], bool]:
+    """The paths a merge tree changes against `base`, and whether every old
+    and new mode is a regular file, as CI's `changed_paths` reads them."""
+    raw = _out("diff", "--raw", "-z", "--no-renames", base, tree)
+    if not raw:
+        return [], True
+    if not raw.endswith("\0"):
+        raise ValueError("incomplete raw Git diff")
+    records = raw[:-1].split("\0")
+    if len(records) % 2:
+        raise ValueError("malformed raw Git diff record")
+    paths, regular = [], True
+    for metadata, path in zip(records[::2], records[1::2]):
+        if not metadata.startswith(":") or not path:
+            raise ValueError("malformed raw Git diff record")
+        old_mode, new_mode = metadata[1:].split()[:2]
+        regular = regular and {old_mode, new_mode} <= REGULAR_MODES
+        paths.append(path)
+    return paths, regular
 
 
 def _has_snapshot_selector(base: str) -> bool:
@@ -497,7 +526,8 @@ def _base_has_snapshot_admission(base: str) -> bool:
         for node in tree.body)
 
 
-def _snapshot_requirement(member: Member, base: str) -> tuple[bool | None, str]:
+def _snapshot_requirement(member: Member, base: str,
+                          rollup: list[dict] | None = None) -> tuple[bool | None, str]:
     try:
         if not _has_snapshot_selector(base):
             return False, ""
@@ -515,21 +545,40 @@ def _snapshot_requirement(member: Member, base: str) -> tuple[bool | None, str]:
         tree = merged.stdout.splitlines()[0]
         # CI diffs its synthetic PR merge against the base parent. A
         # three-dot diff would retain runtime edits already landed on base.
-        files = _out("diff", "--name-only", "--no-renames", base, tree).splitlines()
+        files, regular = _net_diff(base, tree)
         payload = {"root": _out("rev-parse", "--show-toplevel"),
                    "selector": _out("show", f"{base}:{SNAPSHOT_SELECTOR}"),
                    "scope": _out("show", f"{base}:{CI_SCOPE_CODE}"),
-                   "files": sorted(files)}
-        result = _run([sys.executable, "-I", "-c", _SNAPSHOT_INPUTS],
-                      input=json.dumps(payload), check=False)
+                   "files": sorted(files), "regular": regular, "ci_scope": None}
+        with tempfile.TemporaryDirectory(prefix="integrate-snapshot-scope-") as tmp:
+            if _out("ls-tree", base, "--", DOCS_SCOPE):
+                for path in DOCS_SCOPE_FILES:
+                    target = Path(tmp) / path
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(_out("show", f"{base}:{path}") + "\n", encoding="utf-8")
+                payload["ci_scope"] = tmp
+            result = _run([sys.executable, "-I", "-c", _SNAPSHOT_INPUTS],
+                          input=json.dumps(payload), check=False)
         if result.returncode:
             return None, "the frozen snapshot input selector failed; retry build after fixing its inputs"
-        required = json.loads(result.stdout)
-        if type(required) is not bool:
-            raise ValueError("snapshot input selector returned no boolean")
-        return required, ""
+        verdict = json.loads(result.stdout)
+        if (not isinstance(verdict, list) or len(verdict) != 2
+                or not all(type(value) is bool for value in verdict)):
+            raise ValueError("snapshot input selector returned no pair of booleans")
+        rows, skipped = verdict
+        # The scope job skips the Rust lanes of these paths, unless its docs
+        # test selection failed: then it ran them, and the replay counts.
+        return rows and (not skipped or _rust_jobs_ran(rollup)), ""
     except (Refusal, OSError, ValueError) as exc:
         return None, _unread("snapshot inputs", exc) + "; retry build"
+
+
+def _rust_jobs_ran(rollup: list[dict] | None) -> bool:
+    """Whether the head's rollup carries an expanded snapshot job: the Rust
+    workflow ran its Rust lanes there (a lane scope skipped stays unexpanded,
+    `Rust / ${{ matrix.os }}`)."""
+    return any(check.get("name") in SNAPSHOT_JOBS and "context" not in check
+               and check.get("__typename") != "StatusContext" for check in rollup or [])
 
 
 def _snapshot_state(sha: str, rollup: list[dict] | None,
@@ -1103,7 +1152,8 @@ def ready(label: str, base_sha: str | None = None, *, exclude: set[int] | None =
                               if name in jobs else f"{name}: absent"
                               for name in ("Rust / ubuntu-latest", "Rust / windows-latest"))
         if not m.draft and m.checks not in ("failing", "unverified"):
-            m.snapshot_required, why = _snapshot_requirement(m, base_sha)
+            m.snapshot_required, why = _snapshot_requirement(
+                m, base_sha, row.get("statusCheckRollup"))
             m.snapshot, m.snapshot_why = _snapshot_state(
                 m.sha, row.get("statusCheckRollup"), m.snapshot_required)
             m.snapshot_why = why or m.snapshot_why
@@ -3859,13 +3909,15 @@ def _refuse_red_members(plan: Plan) -> None:
         if m.snapshot_required is None and _has_snapshot_selector(plan.base_sha):
             if _base_has_snapshot_admission(plan.base_sha):
                 raise Refusal("the plan lacks the base builder's snapshot admission; rebuild the batch")
-            # The batch can carry the first admission-aware opener while
-            # its master's builder still writes plans without these fields.
-            m.snapshot_required, why = _snapshot_requirement(m, plan.base_sha)
-            if m.snapshot_required is None:
-                raise Refusal(f"#{m.number}: {why}; nothing was opened, fix the cause and retry open")
         view = json.loads(gh("pr", "view", str(m.number), "--json",
                              "headRefOid,statusCheckRollup"))
+        if m.snapshot_required is None and _has_snapshot_selector(plan.base_sha):
+            # The batch can carry the first admission-aware opener while
+            # its master's builder still writes plans without these fields.
+            m.snapshot_required, why = _snapshot_requirement(m, plan.base_sha,
+                                                             view.get("statusCheckRollup"))
+            if m.snapshot_required is None:
+                raise Refusal(f"#{m.number}: {why}; nothing was opened, fix the cause and retry open")
         if view["headRefOid"] != m.sha:
             if plan.stacked_source:
                 raise Refusal(f"#{m.number}'s head moved since the stacked rebuild; build and gate normally")
