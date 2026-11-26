@@ -1,0 +1,2 @@
+### Fixed (2026-11-27 — rerunning the installer with a Gemini CLI registration no longer crashes)
+- Rerunning `ops/install-native.sh` (what `ops/install.sh` runs) on a machine whose Gemini CLI registration already names the native launcher stopped with `registered_shim: unbound variable`. The Gemini step now sets that name itself, so the rerun completes and its warning, when the registration cannot be moved, names the registered command.

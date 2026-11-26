@@ -3582,10 +3582,15 @@ for selected_client in $CLIENTS; do
                 esac
                 managed_registered_shim=""
                 bare_registered_shim=""
+                # Set here, not left from the Codex branch: the warning below
+                # names it, and the installer runs under set -u.
+                registered_shim=""
                 if printf '%s' "$gemini_registration" | grep -Eqi 'pseudolife-memory:[[:space:]]*pseudolife-mcp(\.exe)?[[:space:]]*\(stdio\)'; then
                     managed_registered_shim=1; bare_registered_shim=1
+                    registered_shim=pseudolife-mcp
                 elif resolve_installed_shim && printf '%s' "$gemini_registration" | grep -Fq "pseudolife-memory: $SHIM_PATH (stdio)"; then
                     managed_registered_shim=1
+                    registered_shim=$SHIM_PATH
                 fi
                 if [ -z "$managed_registered_shim" ] && shim_registration_migrates gemini; then
                     if [ "$SHIM_MIGRATED" = current ]; then

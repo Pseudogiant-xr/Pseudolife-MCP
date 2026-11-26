@@ -321,6 +321,32 @@ def test_install_sh_rerun_upgrades_exact_manager_absolute_registration(
     assert "custom registered command" not in output
 
 
+@pytest.mark.parametrize(("migrate_exit", "state"), ((4, "present-current"), (0, "present-upgraded"), (3, "failed")))
+@pytest.mark.parametrize("bash", _bash_variants(), ids=lambda p: Path(p).parent.name)
+def test_install_sh_gemini_rerun_on_the_native_launcher_names_its_command(
+    bash: str, tmp_path: Path, migrate_exit: int, state: str,
+) -> None:
+    # A rerun after a native install: Gemini lists the launcher it registered.
+    # The Gemini branch once read an unset registered_shim here, and the
+    # installer (set -u) died with "unbound variable".
+    proc = _run_bash_existing(
+        bash, tmp_path, client="gemini",
+        config=_custom_config("gemini", "__INSTALLED_SHIM__"), manager_exit=0,
+        migrate_exit=migrate_exit, gemini_guard="enabled",
+    )
+    output = (proc.stdout + proc.stderr).decode(errors="replace").replace("\r", "")
+    assert proc.returncode == 0, output
+    assert "unbound variable" not in output
+    assert f"STATE={state}\n" in output
+    calls = (tmp_path / "calls.txt").read_text(encoding="utf-8").splitlines()
+    assert "launcher|installer migrate-registrations --client gemini" in calls
+    if migrate_exit == 3:
+        launcher = tmp_path / "installed-bin" / "pseudolife-mcp"
+        assert "the Gemini CLI registration still names " in output
+        assert "still names , which" not in output
+        assert launcher.name in output.split("still names ", 1)[1].split(",", 1)[0]
+
+
 @pytest.mark.parametrize("value", TRUTHY_NO_SPAWN)
 @pytest.mark.parametrize("client", VISIBLE_ENV_CLIENTS)
 @pytest.mark.parametrize("bash", _bash_variants(), ids=lambda p: Path(p).parent.name)
