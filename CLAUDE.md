@@ -81,7 +81,7 @@ each exists because it was violated at least once.
 9. **A CI change pays for its slots:** one that adds a hosted job, shard or
    setup cost records its prices and acceptances with
    `rust/ci/ci_budget.py` as `docs/dev/ci-budget.md` says (read it before
-   adding a job or shard) and raises a limit only with its reason
+   adding a job, shard or time bound) and raises a limit only with its reason
    (`rust/ci/test_ci_budget.py`), because every job shares the account's 20
    hosted slots.
 10. **Python is frozen since 14 November 2026:** a change under

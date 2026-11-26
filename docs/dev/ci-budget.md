@@ -156,3 +156,19 @@ Parity gate from a median 58.8 minutes to 36.7:
 - **Measure medians over several runs.** Hosted Windows varies by tens of
   percent, and the account's other work changes how long jobs queue. Use
   each attempt's own start, and drop jobs kept from an earlier attempt.
+
+## Time bounds
+
+A time bound the `CI headroom` workflow checks (a job's `timeout-minutes`,
+a pytest bound in `ops/ci_tests.sh`) sits about 40% over its slowest
+measured hosted run and is raised, or the job made faster, when that
+workflow's issue, "CI: a hosted job is close to its time limit", lists a
+run at 80% or more of it, because the CPU a hosted runner draws can slow
+the same run by a quarter.
+
+40% over the slowest run puts that run at about 71% of its bound, so a run
+at 80% has used most of the margin. The same frozen-inclusive tests ran
+1.26 to 1.27 times slower on an AMD EPYC 7763 runner than on an Intel Xeon
+Platinum 8573C (run 45747873168, #2012). `rust/ci/ci_headroom.py` reads
+every attempt of every job once a day; step-level `timeout-minutes` are
+not checked.
