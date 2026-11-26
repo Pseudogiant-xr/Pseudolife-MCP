@@ -1,2 +1,0 @@
-### Fixed (2026-11-25 — the Python-client installers' bearer refusal names only reruns that work)
-- `ops/install.sh` and `ops/install.ps1` refuse a Rust daemon that will have no bearer token. The refusal offers `--engine python` (`-Engine python`) only where the host has no accepted Rust daemon installed. On a host that has one, that rerun keeps the Rust engine and meets the same refusal, so the line names only the token fixes there.
