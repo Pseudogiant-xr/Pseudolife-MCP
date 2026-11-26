@@ -3824,8 +3824,9 @@ says why in one line in each of these cases:
   one next step is to move the bank to the Docker tier with
   [Move a lite bank to Docker](#move-a-lite-bank-to-docker).
 - `pseudolife-mcp serve`: it does not run the memory daemon, which is the
-  Docker tier's `pseudolife-daemon`; start that with `docker compose -f
-  ops/docker-compose.yml up -d`, or install the Docker tier first.
+  Docker tier's `pseudolife-daemon`; start that with `docker start
+  pseudolife-mcp-postgres pseudolife-mcp-daemon`, or install the Docker tier
+  first.
 - `pseudolife-mcp embedded`: retired with file mode; use the Docker tier.
 - Starting a local daemon itself: the shim starts one only from
   `PSEUDOLIFE_MCP_SERVE_COMMAND`, a JSON argv array (for example
