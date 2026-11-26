@@ -57,7 +57,8 @@ WORKFLOWS = ci_budget.WORKFLOWS
 CI_TESTS = ROOT / "ops/ci_tests.sh"
 # About 80% (W127, 26 November 2026): a 40%-headroom bound sits at 71% of
 # its slowest measured run, so a run past 80% has used up most of that
-# margin. The 2026-11-12..26 survey of every ci.yml and rust.yml attempt
+# margin. W127's survey of every attempt (ci.yml runs created 2026-11-12..26;
+# rust.yml's newest 1000, the listing's cap, back to 2026-11-13 20:58 UTC)
 # found `test` at 62% of its 87-minute job bound and about 70% of its
 # 72-minute frozen-inclusive pytest bound once #2012 raised them, and four
 # Windows bounds above 80%.
@@ -69,7 +70,8 @@ RETENTION_DAYS = 14
 # body holds 65,536 characters.
 PER_BOUND = 5
 MAX_BOUNDS = 12
-# sync's longest look back. Estimated from W127's 2026-11-12..26 survey: the
+# sync's longest look back. Estimated from W127's survey (ci.yml runs created
+# 2026-11-12..26, rust.yml's newest 1000 runs, about 13 days): the
 # run listings take about 90 calls (15 days of five workflows, one query per
 # day, python-freeze.yml's about 130 runs a day on two pages), and each day
 # of activity about 110 more: about 85 runs a day outlast too_short() (about
@@ -416,9 +418,10 @@ def keep(found: list[Finding]) -> list[Finding]:
     return worst if newest in worst else [*worst, newest]
 
 
-def merge(bounds: Bounds, previous: list[Finding], current: list[Finding], now: datetime) -> list[Finding]:
+def ranked(bounds: Bounds, previous: list[Finding], current: list[Finding], now: datetime) -> list[list[Finding]]:
     """Today's findings plus the earlier ones that still hold and are inside
-    the retention window, newest first."""
+    the retention window, as one list of kept runs per bound, the worst
+    bound first."""
     cutoff = now - timedelta(days=RETENTION_DAYS)
     kept = {finding.key(): finding for finding in previous}
     kept.update({finding.key(): finding for finding in current})
@@ -430,9 +433,14 @@ def merge(bounds: Bounds, previous: list[Finding], current: list[Finding], now: 
             groups.setdefault(finding.group(), []).append(finding)
     # The worst runs of each bound, the worst bound first: what a reader
     # needs to size a raise, kept small enough for an issue body.
-    ranked = [keep(found) for found in groups.values()]
-    ranked.sort(key=lambda found: (found[0].share, found[0].job), reverse=True)
-    return [finding for found in ranked[:MAX_BOUNDS] for finding in found]
+    found = [keep(runs) for runs in groups.values()]
+    found.sort(key=lambda runs: (runs[0].share, runs[0].job), reverse=True)
+    return found
+
+
+def merge(bounds: Bounds, previous: list[Finding], current: list[Finding], now: datetime) -> list[Finding]:
+    """The runs the issue lists: those of the worst MAX_BOUNDS bounds."""
+    return [finding for runs in ranked(bounds, previous, current, now)[:MAX_BOUNDS] for finding in runs]
 
 
 # --- The issue -----------------------------------------------------------------
@@ -453,7 +461,8 @@ def parse_state(body: str) -> list[Finding]:
     except ValueError:
         return []
     found = []
-    items = document.get("findings") if isinstance(document, dict) else None
+    # STATE matches only a JSON object, so the document is a dict.
+    items = document.get("findings")
     for item in items if isinstance(items, list) else []:
         if not isinstance(item, dict) or set(item) != set(FIELDS):
             continue
@@ -476,13 +485,28 @@ def parse_state(body: str) -> list[Finding]:
     return found
 
 
+def parse_unlisted(body: str) -> int:
+    """How many bounds an issue body says it left out (0 when it says none)."""
+    match = STATE.search(body or "")
+    try:
+        value = json.loads(match.group(1)).get("unlisted", 0) if match else 0
+    except ValueError:
+        return 0
+    return value if type(value) is int and value >= 0 else 0
+
+
+def unlisted_line(unlisted: int) -> str:
+    return (f"{unlisted} more bounds had a run at {THRESHOLD:.0%} or more and are not listed: the issue "
+            f"keeps the worst {MAX_BOUNDS} (MAX_BOUNDS); the check's run log names today's.")
+
+
 def cell(text: str) -> str:
     """A table cell in plain characters: no markup, link, mention or pipe
     can reach the issue from a job name or a runner's text."""
     return PLAIN.sub("?", str(text))[:120]
 
 
-def render(findings: list[Finding], now: datetime) -> str:
+def render(findings: list[Finding], now: datetime, unlisted: int = 0) -> str:
     rows = []
     for finding in findings:
         what = "job timeout-minutes" if finding.kind == "job" else f"pytest bound ({finding.selection})"
@@ -495,7 +519,7 @@ def render(findings: list[Finding], now: datetime) -> str:
                     f"{cell(finding.conclusion)} | {cell(finding.completed_at[:10])} |")
     # ">" only occurs inside JSON strings, so escaping it keeps "-->" in a
     # job name from ending the comment early.
-    state = json.dumps({"findings": [asdict(finding) for finding in findings]},
+    state = json.dumps({"findings": [asdict(finding) for finding in findings], "unlisted": unlisted},
                        sort_keys=True).replace(">", "\\u003e")
     return "\n".join([
         f"`rust/ci/ci_headroom.py` found hosted runs that used {THRESHOLD:.0%} or more of a time "
@@ -510,6 +534,7 @@ def render(findings: list[Finding], now: datetime) -> str:
         "| Workflow | Job | Bound | Run | Runner CPU | Used | Share | Conclusion | Date (UTC) |",
         "|---|---|---|---|---|---|---|---|---|",
         *rows,
+        *(["", unlisted_line(unlisted)] if unlisted else []),
         "",
         f"Checked {now.strftime('%Y-%m-%d %H:%M')} UTC.",
         f"<!-- ci-headroom-state {state} -->",
@@ -560,8 +585,8 @@ def too_short(bounds: Bounds, workflow: str, run: dict) -> bool:
     """A first attempt that ran for less than THRESHOLD of the workflow's
     smallest bound holds no finding: no job of it ran longer than the run.
     (A later attempt's run times leave out the earlier attempts' jobs.) It
-    saves most calls: on 2026-11-12..26, 711 of 917 ci.yml runs, every
-    python-freeze.yml run and 35 of 1000 rust.yml runs."""
+    saves most calls: in W127's survey, 711 of 917 ci.yml runs (2026-11-12..26),
+    every python-freeze.yml run and 35 of rust.yml's newest 1000."""
     if run.get("run_attempt") != 1 or not run.get("run_started_at") or not run.get("updated_at"):
         return False
     smallest = shortest_bound(bounds, workflow, run)
@@ -641,7 +666,10 @@ def open_issue(github) -> dict | None:
 def sync(github, bounds: Bounds, current: list[Finding], now: datetime) -> str:
     """Create, update or close the one issue; returns what it did."""
     issue = open_issue(github)
-    findings = merge(bounds, parse_state(issue["body"]) if issue else [], current, now)
+    groups = ranked(bounds, parse_state(issue["body"]) if issue else [], current, now)
+    findings = [finding for runs in groups[:MAX_BOUNDS] for finding in runs]
+    unlisted = max(0, len(groups) - MAX_BOUNDS)
+    more = f"; {unlisted} more bounds not listed" if unlisted else ""
     if not findings:
         if issue is None:
             return "no finding; no issue open"
@@ -651,14 +679,15 @@ def sync(github, bounds: Bounds, current: list[Finding], now: datetime) -> str:
         github.json(f"repos/{REPOSITORY}/issues/{issue['number']}", method="PATCH",
                     fields={"state": "closed", "state_reason": "completed"})
         return f"closed #{issue['number']}"
-    body = render(findings, now)
+    body = render(findings, now, unlisted)
     if issue is None:
         created = github.json(f"repos/{REPOSITORY}/issues", method="POST", fields={"title": TITLE, "body": body})
-        return f"opened #{created['number']} with {len(findings)} findings"
-    if STATE.search(issue.get("body") or "") and parse_state(issue["body"]) == findings:
-        return f"#{issue['number']} unchanged ({len(findings)} findings)"
+        return f"opened #{created['number']} with {len(findings)} findings{more}"
+    if (STATE.search(issue.get("body") or "") and parse_state(issue["body"]) == findings
+            and parse_unlisted(issue["body"]) == unlisted):
+        return f"#{issue['number']} unchanged ({len(findings)} findings{more})"
     github.json(f"repos/{REPOSITORY}/issues/{issue['number']}", method="PATCH", fields={"body": body})
-    return f"updated #{issue['number']} with {len(findings)} findings"
+    return f"updated #{issue['number']} with {len(findings)} findings{more}"
 
 
 # --- Command line --------------------------------------------------------------
@@ -667,6 +696,10 @@ def summary(reading: Reading) -> str:
     lines = [f"read {reading.runs} runs, {reading.jobs} job attempts ({reading.forks} fork runs left unread, "
              f"{reading.short} runs too short to near a bound); "
              f"{len(reading.findings)} at {THRESHOLD:.0%} or more of a bound"]
+    bounds_found = len({finding.group() for finding in reading.findings})
+    if bounds_found > MAX_BOUNDS:
+        lines.append(f"{bounds_found} bounds have a finding; the issue lists the worst {MAX_BOUNDS} "
+                     f"and says {bounds_found - MAX_BOUNDS} more are not listed")
     for finding in sorted(reading.findings, key=lambda finding: -finding.share):
         what = "job" if finding.kind == "job" else f"pytest {finding.selection}"
         lines.append(f"  {finding.share:6.1%}  {finding.workflow}: {finding.job} [{what}] run {finding.run_id} "
@@ -689,7 +722,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", choices=("report", "sync"),
                         help="report prints the findings; sync keeps them in one issue")
     parser.add_argument("--days", type=int, default=2,
-                        help="read runs created in the last N days (default 2; the daily schedule overlaps)")
+                        help="read runs with activity (a finish or a rerun) in the last N days "
+                             "(default 2; the daily schedule overlaps)")
     options = parser.parse_args(argv)
     if not 1 <= options.days <= RETENTION_DAYS:
         parser.error(f"--days must be between 1 and {RETENTION_DAYS}")

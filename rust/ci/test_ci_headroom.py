@@ -446,6 +446,43 @@ def test_a_bound_keeps_its_newest_near_miss():
     assert ci_headroom.merge(bounds(), kept, [], later) == [newest]
 
 
+def many_bounds(extra=3):
+    """MAX_BOUNDS + extra bounds, each with one near miss, and checked bounds
+    that define them all."""
+    finding = current()[0]
+    count = ci_headroom.MAX_BOUNDS + extra
+    found = [Finding(**{**finding.__dict__, "job": f"job {n:02d}", "minutes": finding.bound * (0.8 + n / 200)})
+             for n in range(count)]
+    ci = copy.deepcopy(CI)
+    for n in range(count):
+        ci["jobs"][f"j{n}"] = {"name": f"job {n:02d}", "timeout-minutes": finding.bound, "steps": [{"run": "true"}]}
+    return found, bounds(ci=ci)
+
+
+def test_bounds_past_the_cap_are_counted_not_silently_dropped():
+    found, checked = many_bounds()
+    github = Recorded()
+    assert ci_headroom.sync(github, checked, found, NOW) == (
+        f"opened #900 with {ci_headroom.MAX_BOUNDS} findings; 3 more bounds not listed")
+    body = github.issues[0]["body"]
+    assert "3 more bounds had a run at 80% or more and are not listed" in body
+    assert ci_headroom.parse_unlisted(body) == 3
+    assert ci_headroom.sync(github, checked, found, NOW).endswith("unchanged (12 findings; 3 more bounds not listed)")
+    # One fewer bound left out is a change the issue shows.
+    assert ci_headroom.sync(github, checked, found[1:], NOW).startswith("updated #900")
+    assert ci_headroom.parse_unlisted(github.issues[0]["body"]) == 2
+    reading = Reading(findings=found)
+    assert "15 bounds have a finding; the issue lists the worst 12 and says 3 more" in ci_headroom.summary(reading)
+
+
+def test_the_unlisted_count_is_read_as_data():
+    for body, count in (("", 0), ("<!-- ci-headroom-state {\"findings\": []} -->", 0),
+                        ("<!-- ci-headroom-state {\"findings\": [], \"unlisted\": 4} -->", 4),
+                        ("<!-- ci-headroom-state {\"findings\": [], \"unlisted\": -1} -->", 0),
+                        ("<!-- ci-headroom-state {\"findings\": [], \"unlisted\": \"4\"} -->", 0)):
+        assert ci_headroom.parse_unlisted(body) == count, body
+
+
 def test_sync_reads_at_most_its_days(monkeypatch):
     class Offline:
         def __init__(self):
@@ -532,7 +569,7 @@ def test_each_bound_keeps_its_worst_runs():
     '<!-- ci-headroom-state {"findings": "x"} -->',
     '<!-- ci-headroom-state {"findings": 5} -->',
     '<!-- ci-headroom-state {"findings": null} -->',
-    '<!-- ci-headroom-state [1, 2] -->',
+    '<!-- ci-headroom-state {"findings": [1, "x", null]} -->',
 ])
 def test_a_malformed_state_is_ignored(body):
     assert ci_headroom.parse_state(body) == []

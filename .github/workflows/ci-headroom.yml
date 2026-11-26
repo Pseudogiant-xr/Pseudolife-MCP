@@ -23,7 +23,7 @@ on:
   workflow_dispatch:
     inputs:
       days:
-        description: Read the runs created in the last N days (1 to 3)
+        description: Read the runs with activity (a finish or a rerun) in the last N days (1 to 3)
         default: "2"
         type: string
 
