@@ -556,12 +556,31 @@ mod posix {
         )
     }
 
+    /// Whether the scratch folder's filesystem is one the rule accepts; the
+    /// positive cases skip, saying why, when the temporary folder is not.
+    #[cfg(target_os = "linux")]
+    fn local_scratch(scratch: &Scratch) -> bool {
+        let local = on_local_filesystem(&scratch.0);
+        if !local {
+            eprintln!(
+                "private-group case skipped: {} is not on a filesystem the rule accepts",
+                scratch.0.display()
+            );
+        }
+        local
+    }
+
+    #[cfg(target_os = "linux")]
     #[test]
     fn a_users_private_group_folder_is_trusted_for_a_client_config() {
         let scratch = Scratch::new("private-group");
         let (file, uid, gid) = group_writable_config(&scratch);
         // The plain rule is unchanged: the token file would still refuse it.
         assert!(check_ancestors(&file).is_err());
+        if !local_scratch(&scratch) {
+            mode(&scratch.0.join("config"), 0o700);
+            return;
+        }
         // The user's own private group: the umask-002 case passes.
         for members in ["", "me"] {
             assert_eq!(
@@ -570,6 +589,19 @@ mod posix {
                 "members {members:?}"
             );
         }
+        mode(&scratch.0.join("config"), 0o700);
+    }
+
+    /// Off Linux (macOS: its primary group is the shared `staff`) the
+    /// client-config check is the plain rule, even for a private group.
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn off_linux_a_private_group_folder_keeps_the_plain_rule() {
+        let scratch = Scratch::new("private-group-elsewhere");
+        let (file, uid, gid) = group_writable_config(&scratch);
+        let refusal =
+            check_ancestors_with(&file, accounts(uid, gid, gid, "me", "", "")).unwrap_err();
+        assert_eq!(refusal.element, scratch.0.join("config/Claude"));
         mode(&scratch.0.join("config"), 0o700);
     }
 
@@ -631,6 +663,65 @@ mod posix {
                     &format!("me:x:{gid}:\nshared:x:{gid}:other\n"),
                 ),
             ),
+            (
+                "a group line whose gid glibc reads past a space",
+                Accounts::from_text(
+                    &format!("me:x:{uid}:{gid}::/home/me:/bin/sh\n"),
+                    &format!("me:x:{gid}:\nshared:x: {gid}:mallory\n"),
+                ),
+            ),
+            (
+                "a passwd line whose primary gid glibc reads past a space",
+                Accounts::from_text(
+                    &format!(
+                        "me:x:{uid}:{gid}::/home/me:/bin/sh\nother:x:{}: {gid}::/home/o:/bin/sh\n",
+                        uid + 1
+                    ),
+                    &format!("me:x:{gid}:\n"),
+                ),
+            ),
+            (
+                "a group line glibc reads after leading whitespace",
+                Accounts::from_text(
+                    &format!("me:x:{uid}:{gid}::/home/me:/bin/sh\n"),
+                    &format!("me:x:{gid}:\n shared:x:{gid}:mallory\n"),
+                ),
+            ),
+            (
+                "a group line with a field too many",
+                Accounts::from_text(
+                    &format!("me:x:{uid}:{gid}::/home/me:/bin/sh\n"),
+                    &format!("me:x:{gid}::other\n"),
+                ),
+            ),
+            (
+                "a compat-mode reference in the passwd file",
+                Accounts::from_text(
+                    &format!(
+                        "me:x:{uid}:{gid}::/home/me:/bin/sh\n+other:x:{}:{}::/home/o:/bin/sh\n",
+                        uid + 1,
+                        gid + 1
+                    ),
+                    &format!("me:x:{gid}:\n"),
+                ),
+            ),
+            (
+                "a second passwd name for the same uid",
+                Accounts::from_text(
+                    &format!(
+                        "me:x:{uid}:{gid}::/home/me:/bin/sh\nalias:x:{uid}:{gid}::/home/me:/bin/sh\n"
+                    ),
+                    &format!("me:x:{gid}:\n"),
+                ),
+            ),
+            (
+                "groups also from systemd's userdb (nsswitch)",
+                Accounts::from_files(
+                    &format!("me:x:{uid}:{gid}::/home/me:/bin/sh\n"),
+                    &format!("me:x:{gid}:\n"),
+                    "passwd: files systemd\ngroup: files [SUCCESS=merge] systemd\n",
+                ),
+            ),
         ] {
             let refusal = check_ancestors_with(&file, accounts).unwrap_err();
             assert_eq!(refusal.element, scratch.0.join("config/Claude"), "{why}");
@@ -644,25 +735,55 @@ mod posix {
     #[test]
     fn only_local_account_sources_count_as_files_only() {
         for (text, files_only) in [
-            ("", true),
+            // An empty file names neither database: glibc's default, unread.
+            ("", false),
+            ("hosts: files dns\n", false),
+            ("passwd: files\n", false),
             ("passwd: files\ngroup: files\n", true),
+            ("passwd: files\ngroup: files\nhosts: files dns\n", true),
+            // A line with no source is glibc's default, not read here.
+            ("passwd: files\ngroup:\n", false),
+            ("passwd: files\ngroup: [NOTFOUND=return]\n", false),
+            // systemd also serves userdb and homed records.
+            ("passwd: files systemd\ngroup: files systemd\n", false),
             (
-                "passwd: files systemd\ngroup: files systemd\nhosts: files dns\n",
-                true,
+                "passwd: files\ngroup: files [SUCCESS=merge] systemd\n",
+                false,
             ),
+            (
+                "passwd: files\ngroup: files\ninitgroups: files systemd\n",
+                false,
+            ),
+            ("passwd: files systemd\ngroup: files\n", false),
             ("passwd: compat\ngroup: compat\nshadow: compat\n", false),
-            ("# group: ldap\npasswd: files\n", true),
+            ("# group: ldap\npasswd: files\ngroup: files\n", true),
+            // glibc ends the database name at whitespace or `:`.
+            ("passwd: files\ngroup files ldap\n", false),
+            ("passwd files\ngroup\tfiles\n", true),
+            ("passwd: files\ngroup: files\nGROUP: ldap\n", false),
+            ("passwd: files\n  group : files nis\n", false),
             ("passwd: files sss\ngroup: files sss\n", false),
             ("passwd: files\ngroup: files [SUCCESS=merge] ldap\n", false),
-            ("group: files [NOTFOUND=return] winbind\n", false),
+            (
+                "passwd: files\ngroup: files [NOTFOUND=return] winbind\n",
+                false,
+            ),
             (
                 "passwd: files\ngroup: files\ninitgroups: files sss\n",
                 false,
             ),
             ("passwd: files\ngroup:\tfiles nis\n", false),
-            ("group: files [NOTFOUND=return]sss\n", false),
-            ("group: files [NOTFOUND=return\n", false),
-            ("group: files [ NOTFOUND=return ] systemd\n", true),
+            // Each with a `passwd` line, so only the brackets decide.
+            ("passwd: files\ngroup: files [NOTFOUND=return]sss\n", false),
+            ("passwd: files\ngroup: files [NOTFOUND=return\n", false),
+            (
+                "passwd: files\ngroup: files [ NOTFOUND=return ] files\n",
+                true,
+            ),
+            (
+                "passwd: files\ngroup: files [ NOTFOUND=return ] systemd\n",
+                false,
+            ),
         ] {
             assert_eq!(nss_files_only(text), files_only, "{text:?}");
         }
@@ -677,6 +798,10 @@ mod posix {
         let (file, uid, gid) = group_writable_config(&scratch);
         let config = scratch.0.join("config");
         let mine = accounts(uid, gid, gid, "me", "", "");
+        if !local_scratch(&scratch) {
+            mode(&config, 0o700);
+            return;
+        }
         assert_eq!(check_ancestors_with(&file, mine.clone()), Ok(()));
         let added = std::process::Command::new("setfacl")
             .args(["-m", "u:nobody:rwx"])
@@ -692,6 +817,106 @@ mod posix {
         }
         assert!(check_ancestors_with(&file, mine).is_err());
         mode(&config, 0o700);
+    }
+
+    /// Only a filesystem on the allowlist counts: procfs and sysfs (and a
+    /// path statfs cannot read) do not.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn only_a_local_filesystem_on_the_allowlist_counts() {
+        for path in ["/proc", "/sys", "/nonexistent-pl-private-path"] {
+            assert!(!on_local_filesystem(Path::new(path)), "{path}");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn only_a_folder_with_no_acl_on_a_filesystem_that_supports_them_passes() {
+        use rustix::io::Errno;
+        for (posix, nfs4, allowed) in [
+            (Err(Errno::NODATA), Err(Errno::NODATA), true),
+            (Ok(0), Err(Errno::NOTSUP), true),
+            (Err(Errno::NODATA), Ok(0), true),
+            // A POSIX access ACL: the group bits are only its mask.
+            (Ok(44), Err(Errno::NODATA), false),
+            // No POSIX ACL support: unknown.
+            (Err(Errno::NOTSUP), Err(Errno::NOTSUP), false),
+            // An NFSv4 ACL.
+            (Err(Errno::NODATA), Ok(80), false),
+            (Err(Errno::NOTSUP), Ok(80), false),
+            // Any other error.
+            (Err(Errno::NODATA), Err(Errno::ACCESS), false),
+            (Err(Errno::ACCESS), Err(Errno::NODATA), false),
+        ] {
+            assert_eq!(acls_allow(posix, nfs4), allowed, "{posix:?} {nfs4:?}");
+        }
+    }
+
+    #[test]
+    fn the_system_accounts_are_read_from_the_root_and_fail_closed() {
+        let scratch = Scratch::new("accounts-root");
+        let root = &scratch.0;
+        let write = |file: &str, text: &str| {
+            let path = root.join(file);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        };
+        write(
+            "etc/passwd",
+            "root:x:0:0::/root:/bin/sh\nme:x:1000:1000::/home/me:/bin/sh\n",
+        );
+        write("etc/group", "root:x:0:\nme:x:1000:\n");
+        // No nsswitch.conf at all: glibc's built-in default, not read here.
+        assert!(
+            !Accounts::under(root).private_group(1000, 1000),
+            "no nsswitch.conf"
+        );
+        write("etc/nsswitch.conf", "passwd: files\ngroup: files\n");
+        assert!(
+            Accounts::under(root).private_group(1000, 1000),
+            "files only"
+        );
+        assert!(
+            !Accounts::under(root).private_group(1000, 1001),
+            "another gid"
+        );
+        // openSUSE's /usr/etc copy is read too.
+        write(
+            "usr/etc/nsswitch.conf",
+            "passwd: files\ngroup: files ldap\n",
+        );
+        assert!(
+            !Accounts::under(root).private_group(1000, 1000),
+            "/usr/etc ldap"
+        );
+        write("usr/etc/nsswitch.conf", "passwd: files\ngroup: files\n");
+        assert!(
+            Accounts::under(root).private_group(1000, 1000),
+            "/usr/etc files"
+        );
+        fs::remove_file(root.join("etc/nsswitch.conf")).unwrap();
+        assert!(
+            Accounts::under(root).private_group(1000, 1000),
+            "/usr/etc alone"
+        );
+        write("etc/nsswitch.conf", "passwd: files\ngroup: files\n");
+        // Any userdb drop-in record: members the group file does not show.
+        for (dir, record) in [
+            ("etc/userdb", "other.user"),
+            ("run/userdb", "me.group"),
+            ("usr/lib/userdb", "other:me.membership"),
+        ] {
+            write(&format!("{dir}/{record}"), "{}");
+            assert!(
+                !Accounts::under(root).private_group(1000, 1000),
+                "{dir}/{record}"
+            );
+            fs::remove_dir_all(root.join(dir)).unwrap();
+        }
+        assert!(
+            Accounts::under(root).private_group(1000, 1000),
+            "drop-ins removed"
+        );
     }
 }
 

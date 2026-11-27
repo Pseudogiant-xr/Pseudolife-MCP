@@ -329,12 +329,6 @@ fn inspect_redirect(path: &Path) -> io::Result<bool> {
 pub(crate) fn reject_ancestor_redirects(path: &Path) -> Result<(), CredentialError> {
     crate::private_path::check_ancestors(path).map_err(refusal_code)
 }
-/// [`reject_ancestor_redirects`] for a client's own config file, which also
-/// trusts a folder only the user's own private group may write
-/// (`private_path::check_client_config_ancestors`).
-pub(crate) fn reject_client_config_redirects(path: &Path) -> Result<(), CredentialError> {
-    crate::private_path::check_client_config_ancestors(path).map_err(refusal_code)
-}
 /// [`reject_ancestor_redirects`] for `path` itself too: a private folder used
 /// as a folder, where a link in its place is followed.
 pub(crate) fn reject_redirects(path: &Path) -> Result<(), CredentialError> {

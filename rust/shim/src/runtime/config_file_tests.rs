@@ -325,7 +325,16 @@ mod links {
         fs::set_permissions(&shared, fs::Permissions::from_mode(0o777)).unwrap();
         let result = write_config(&shared.join("config/client.json"), b"before", b"after");
         fs::set_permissions(&shared, fs::Permissions::from_mode(0o700)).unwrap();
-        assert_eq!(result.unwrap_err(), "client config target is redirected");
+        // The refusal names the link, the folder and the fix.
+        let error = result.unwrap_err();
+        assert!(
+            error.contains(&shared.join("config").display().to_string()),
+            "{error}"
+        );
+        assert!(
+            error.contains(&format!("fix: chmod go-w '{}'", shared.display())),
+            "{error}"
+        );
         assert_eq!(fs::read(real.join("client.json")).unwrap(), b"before");
         assert_eq!(fs::read_dir(&real).unwrap().count(), 1, "no backup written");
     }
@@ -347,7 +356,15 @@ mod links {
         fs::set_permissions(&shared, fs::Permissions::from_mode(0o777)).unwrap();
         let result = write_config(&link, b"before", b"after");
         fs::set_permissions(&shared, fs::Permissions::from_mode(0o700)).unwrap();
-        assert_eq!(result.unwrap_err(), "client config target is redirected");
+        let error = result.unwrap_err();
+        assert!(
+            error.contains(&shared.join("dir").display().to_string()),
+            "{error}"
+        );
+        assert!(
+            error.contains(&format!("fix: chmod go-w '{}'", shared.display())),
+            "{error}"
+        );
         assert_eq!(fs::read(real.join("client.json")).unwrap(), b"before");
     }
 

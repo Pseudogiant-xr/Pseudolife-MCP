@@ -22,8 +22,9 @@ pub(super) fn write_config_with(
     // not checked: whoever can replace it can already rewrite the config.)
     let mut hop = path.to_owned();
     for _ in 0..=crate::private_path::MAX_LINKS {
-        crate::credentials::reject_client_config_redirects(&hop)
-            .map_err(|_| "client config target is redirected")?;
+        // The refusal names the folder and its fix, for the installer's detail.
+        crate::private_path::check_client_config_ancestors(&hop)
+            .map_err(|refusal| refusal.to_string())?;
         let Ok(next) = fs::read_link(&hop) else {
             break;
         };
@@ -37,8 +38,8 @@ pub(super) fn write_config_with(
     } else {
         path.to_owned()
     };
-    crate::credentials::reject_client_config_redirects(&target)
-        .map_err(|_| "client config target is redirected")?;
+    crate::private_path::check_client_config_ancestors(&target)
+        .map_err(|refusal| refusal.to_string())?;
     let parent = target.parent().ok_or("client config has no parent")?;
     if !parent.is_dir() {
         crate::board::state::private_dir(parent).map_err(str::to_owned)?;

@@ -264,10 +264,10 @@ pub fn check_path(path: &Path) -> Result<(), Refusal> {
 }
 
 /// [`check_ancestors`] for a client's own config file (the maintainer's
-/// ruling on #2032): on Unix a link in a folder only its group may also
+/// ruling on #2032): on Linux a link in a folder only its group may also
 /// write is trusted when that group is the user's own private group (as
 /// umask 002 leaves `~/.config` on user-private-group systems), because no
-/// other account is in it.
+/// other account is in it. Elsewhere it is the plain rule.
 pub fn check_client_config_ancestors(path: &Path) -> Result<(), Refusal> {
     #[cfg(unix)]
     {
@@ -293,37 +293,48 @@ pub(crate) fn check_ancestors_with(path: &Path, accounts: Accounts) -> Result<()
 
 /// The local account files, read to tell a user's private group from a
 /// shared one. An account they do not list (one from LDAP, say) is never
-/// taken for a private group, and nor is any group while the system also
-/// takes accounts or groups from a source those files do not show
-/// (`nsswitch.conf`), so its folders keep the plain rule. `/etc/gshadow`
-/// is readable only by root and is not consulted.
+/// taken for a private group, and nor is any group while the system may
+/// also take accounts or groups from a source those files do not show
+/// (`nsswitch.conf`, systemd's userdb), so its folders keep the plain rule.
+/// `/etc/gshadow` is readable only by root and is not consulted.
 #[cfg(unix)]
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Accounts {
     passwd: String,
     group: String,
-    /// `nsswitch.conf` takes `passwd` and `group` only from these files.
+    /// `passwd`, `group` and `initgroups` come only from these files.
     files_only: bool,
 }
 
-/// Whether `nsswitch.conf` takes `passwd`, `group` and `initgroups` only from the local
-/// files: `files`, or `systemd` (which adds only its own dynamic users and
-/// groups). `compat` is not, since its `+`/`-` lines pull in NIS. No such
-/// line means `files`.
+/// Whether `nsswitch.conf` takes `passwd`, `group` and `initgroups` only from
+/// the local files. Only `files` counts: `systemd` also serves userdb and
+/// systemd-homed records (`*.user` `memberOf`, `*.group` members, varlink)
+/// these files do not show, and `compat`'s `+`/`-` lines pull in NIS. Both
+/// `passwd` and `group` must be named, each line with `files` in it (one
+/// with no source is glibc's default, unread); `initgroups` falls back to
+/// `group`.
+/// As glibc does, a database name ends at whitespace or `:`, case aside.
 #[cfg(unix)]
 pub(crate) fn nss_files_only(nsswitch: &str) -> bool {
-    nsswitch.lines().all(|line| {
-        let line = line.split('#').next().unwrap_or("");
-        let Some((database, sources)) = line.split_once(':') else {
-            return true;
-        };
-        // `initgroups` can add supplementary groups on its own.
-        if !matches!(database.trim(), "passwd" | "group" | "initgroups") {
-            return true;
+    let (mut passwd, mut group) = (false, false);
+    let local = nsswitch.lines().all(|line| {
+        let line = line.split('#').next().unwrap_or("").trim_start();
+        let end = line
+            .find(|c: char| c.is_whitespace() || c == ':')
+            .unwrap_or(line.len());
+        let (database, sources) = line.split_at(end);
+        let sources = sources.trim_start_matches(|c: char| c.is_whitespace() || c == ':');
+        match database.to_ascii_lowercase().as_str() {
+            "passwd" => passwd = true,
+            "group" => group = true,
+            // `initgroups` can add supplementary groups on its own.
+            "initgroups" => {}
+            _ => return true,
         }
         // A `[...]` action group is skipped only when its brackets stand
         // alone; a service name glued to one (`[...]sss`) fails.
         let mut in_action = false;
+        let mut files = false;
         sources.split_whitespace().all(|word| {
             if in_action || word.starts_with('[') {
                 match word.find(']') {
@@ -333,49 +344,101 @@ pub(crate) fn nss_files_only(nsswitch: &str) -> bool {
                 }
                 return true;
             }
-            matches!(word, "files" | "systemd")
+            files = word == "files";
+            files
         }) && !in_action
-    })
+            && files
+    });
+    local && passwd && group
 }
+
+/// The colon-separated records of an account file, or `None` when any line
+/// that is not blank or a comment does not have `width` fields or is a
+/// compat `+`/`-` reference to another source. (glibc skips leading
+/// whitespace, which this reader keeps: such a name never matches the
+/// user's, so the line can only make a group look less private.)
+#[cfg(unix)]
+fn records(text: &str, width: usize) -> Option<Vec<Vec<&str>>> {
+    let mut rows = Vec::new();
+    for line in text.lines() {
+        let content = line.trim_start();
+        if content.is_empty() || content.starts_with('#') {
+            continue;
+        }
+        if line.starts_with(['+', '-']) {
+            return None;
+        }
+        let fields: Vec<&str> = line.split(':').collect();
+        if fields.len() != width {
+            return None;
+        }
+        rows.push(fields);
+    }
+    Some(rows)
+}
+
+/// A numeric id field. glibc's `strtoul` also reads ` 1000` or `-1`, which
+/// this parse does not, so the caller treats `None` as not private, never
+/// as a line to skip.
+#[cfg(unix)]
+fn numeric_id(field: &str) -> Option<u32> {
+    field.parse().ok()
+}
+
+/// The folders systemd's userdb reads drop-in records from (`*.user`,
+/// `*.group`, `*.membership`), relative to the root.
+#[cfg(unix)]
+const USERDB_DIRS: [&str; 5] = [
+    "etc/userdb",
+    "run/userdb",
+    "run/host/userdb",
+    "usr/lib/userdb",
+    "usr/local/lib/userdb",
+];
+
+/// Where glibc may read `nsswitch.conf`, relative to the root: openSUSE's
+/// glibc falls back to `/usr/etc` when `/etc` has none.
+#[cfg(unix)]
+const NSSWITCH_FILES: [&str; 2] = ["usr/etc/nsswitch.conf", "etc/nsswitch.conf"];
 
 #[cfg(unix)]
 impl Accounts {
     pub(crate) fn system() -> Self {
-        let nsswitch = match std::fs::read_to_string("/etc/nsswitch.conf") {
-            Ok(text) => Some(text),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Some(String::new()),
-            Err(_) => None,
-        };
-        // systemd's userdb adds members through `*.membership` drop-ins, a
-        // source the group file does not show.
-        let userdb_membership = [
-            "/etc/userdb",
-            "/run/userdb",
-            "/run/host/userdb",
-            "/usr/lib/userdb",
-            "/usr/local/lib/userdb",
-        ]
-        .iter()
-        .any(|dir| match std::fs::read_dir(dir) {
-            Ok(entries) => entries
-                .flatten()
-                .any(|entry| entry.file_name().to_string_lossy().ends_with(".membership")),
-            Err(error) => error.kind() != io::ErrorKind::NotFound,
-        });
+        Self::under(Path::new("/"))
+    }
+
+    /// The account files under `root` (`/` but in tests). Files-only needs
+    /// at least one `nsswitch.conf`, every one that exists files-only (a
+    /// missing one is glibc's built-in default, not read here, so it fails
+    /// closed), and no userdb drop-in record at all.
+    pub(crate) fn under(root: &Path) -> Self {
+        let mut found = false;
+        let nsswitch_local =
+            NSSWITCH_FILES
+                .iter()
+                .all(|file| match std::fs::read_to_string(root.join(file)) {
+                    Ok(text) => {
+                        found = true;
+                        nss_files_only(&text)
+                    }
+                    Err(error) => error.kind() == io::ErrorKind::NotFound,
+                });
+        let userdb = USERDB_DIRS
+            .iter()
+            .any(|dir| match std::fs::read_dir(root.join(dir)) {
+                Ok(mut entries) => entries.next().is_some(),
+                Err(error) => error.kind() != io::ErrorKind::NotFound,
+            });
         Self {
-            passwd: std::fs::read_to_string("/etc/passwd").unwrap_or_default(),
-            group: std::fs::read_to_string("/etc/group").unwrap_or_default(),
-            files_only: !userdb_membership && nsswitch.as_deref().is_some_and(nss_files_only),
+            passwd: std::fs::read_to_string(root.join("etc/passwd")).unwrap_or_default(),
+            group: std::fs::read_to_string(root.join("etc/group")).unwrap_or_default(),
+            files_only: found && nsswitch_local && !userdb,
         }
     }
 
     #[cfg(test)]
     pub(crate) fn from_text(passwd: &str, group: &str) -> Self {
-        Self::from_files(
-            passwd,
-            group,
-            "passwd: files systemd\ngroup: files systemd\n",
-        )
+        Self::from_files(passwd, group, "passwd: files\ngroup: files\n")
     }
 
     #[cfg(test)]
@@ -389,26 +452,22 @@ impl Accounts {
 
     /// `gid` is `uid`'s private group: its primary group, named as the
     /// user is, with no other member, and no other account's primary group.
+    /// Any record line that does not read cleanly makes it not private.
     pub(crate) fn private_group(&self, uid: u32, gid: u32) -> bool {
-        // A `+`/`-` line is a compat-mode reference to another source.
-        let external = |text: &str| {
-            text.lines()
-                .any(|line| line.starts_with('+') || line.starts_with('-'))
-        };
-        if !self.files_only || external(&self.passwd) || external(&self.group) {
+        if !self.files_only {
             return false;
         }
-        let users: Vec<(&str, u32, u32)> = self
-            .passwd
-            .lines()
-            .filter_map(|line| {
-                let mut fields = line.split(':');
-                let name = fields.next()?;
-                let id = fields.nth(1)?.parse().ok()?;
-                let primary = fields.next()?.parse().ok()?;
-                Some((name, id, primary))
-            })
-            .collect();
+        let (Some(passwd), Some(group)) = (records(&self.passwd, 7), records(&self.group, 4))
+        else {
+            return false;
+        };
+        let mut users = Vec::new();
+        for fields in &passwd {
+            let (Some(id), Some(primary)) = (numeric_id(fields[2]), numeric_id(fields[3])) else {
+                return false;
+            };
+            users.push((fields[0], id, primary));
+        }
         let Some(&(name, _, primary)) = users.iter().find(|(_, id, _)| *id == uid) else {
             return false;
         };
@@ -421,18 +480,15 @@ impl Accounts {
         }
         // Every entry for the gid, not only the first: a second one with
         // another name or members makes it shared.
-        let entries: Vec<(&str, &str, &str)> = self
-            .group
-            .lines()
-            .filter_map(|line| {
-                let mut fields = line.split(':');
-                let group = fields.next()?;
-                let password = fields.next()?;
-                let id: u32 = fields.next()?.parse().ok()?;
-                let members = fields.next().unwrap_or("");
-                (id == gid).then_some((group, password, members))
-            })
-            .collect();
+        let mut entries = Vec::new();
+        for fields in &group {
+            let Some(id) = numeric_id(fields[2]) else {
+                return false;
+            };
+            if id == gid {
+                entries.push((fields[0], fields[1], fields[3]));
+            }
+        }
         // A group password lets anyone who knows it join with newgrp: only
         // a locked or shadowed field (`x`, `!`, `*`, empty) counts. What
         // `/etc/gshadow` holds behind `x` (readable only by root) only root
@@ -449,14 +505,10 @@ impl Accounts {
     }
 }
 
-/// No ACL on `path` that could let another account write: with a POSIX
-/// access ACL the mode's group bits are only its mask. Only a filesystem
-/// that supports POSIX ACLs and reports none passes (a filesystem that does
-/// not support them is unknown, so it fails); an NFSv4 ACL fails too.
 /// The folder is on a local filesystem whose gids are this host's own: a
 /// network or FUSE filesystem may map them differently, so it fails.
 #[cfg(target_os = "linux")]
-fn on_local_filesystem(path: &Path) -> bool {
+pub(crate) fn on_local_filesystem(path: &Path) -> bool {
     // ext2/3/4, xfs, btrfs, tmpfs, f2fs, zfs, bcachefs, overlayfs.
     const LOCAL: [i64; 8] = [
         0xEF53,
@@ -473,13 +525,27 @@ fn on_local_filesystem(path: &Path) -> bool {
     rustix::fs::statfs(path).is_ok_and(|fs| LOCAL.contains(&(fs.f_type as i64)))
 }
 
+/// No ACL on `path` that could let another account write: with a POSIX
+/// access ACL the mode's group bits are only its mask.
 #[cfg(target_os = "linux")]
 fn without_access_acl(path: &Path) -> bool {
-    use rustix::io::Errno;
     // A zero-length read returns the attribute's size without its value.
     let mut empty: [u8; 0] = [];
-    let posix = rustix::fs::getxattr(path, "system.posix_acl_access", &mut empty[..]);
-    let nfs4 = rustix::fs::getxattr(path, "system.nfs4_acl", &mut empty[..]);
+    acls_allow(
+        rustix::fs::getxattr(path, "system.posix_acl_access", &mut empty[..]),
+        rustix::fs::getxattr(path, "system.nfs4_acl", &mut empty[..]),
+    )
+}
+
+/// What the two ACL reads must say: only a filesystem that supports POSIX
+/// ACLs and reports none passes (one that does not support them is unknown,
+/// so it fails), and an NFSv4 ACL fails too; any other error fails.
+#[cfg(target_os = "linux")]
+pub(crate) fn acls_allow(
+    posix: rustix::io::Result<usize>,
+    nfs4: rustix::io::Result<usize>,
+) -> bool {
+    use rustix::io::Errno;
     matches!(posix, Ok(0) | Err(Errno::NODATA))
         && matches!(nfs4, Ok(0) | Err(Errno::NODATA | Errno::NOTSUP))
 }
