@@ -1,2 +1,0 @@
-### Fixed (2026-11-27 — `pseudolife-mcp briefing` uses the installer's token file)
-- `pseudolife-mcp briefing` read the bearer only from `PSEUDOLIFE_MCP_TOKEN`, so on a client-only install without the plugin, where the installer writes `PSEUDOLIFE_MCP_TOKEN_FILE` into the Claude Code settings, the session-start briefing was refused by the daemon and silently missing. It now reads the token file first, as `prompt-hook` and the MCP shim do; an unusable token file sends no briefing request.
