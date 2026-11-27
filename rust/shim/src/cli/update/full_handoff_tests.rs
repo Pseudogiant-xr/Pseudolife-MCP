@@ -586,6 +586,9 @@ fn no_full_hand_off_to_the_running_version_or_older_or_outside_a_release_update(
     for tweak in tweaks {
         let mut u = update();
         tweak(&mut u.o);
+        // A Docker host, so only the option can stop the run before it looks
+        // up a release.
+        u.command_probe = Some(|_| (0, "fixture-daemon".into()));
         u.release_lookup = Some(Box::new(|| panic!("looked up a release")));
         assert_eq!(u.full_handoff_target(), None);
     }
