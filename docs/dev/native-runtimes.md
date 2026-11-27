@@ -170,11 +170,15 @@ Python venv structure are eligible for Python's age-based cleanup.
 Pruning considers only verified native directories. It retains the newest,
 the updater's own runtime, process-held runtimes, registered paths and saved
 tunnel snapshot dependencies. It also checks the native usage lock before
-quarantining an old directory. Unknown registration or tunnel evidence and
-ambiguous readable process evidence remove nothing. On Windows, inaccessible
-system processes do not veto pruning when the exclusive runtime usage lock can
-be acquired: a live native launcher holds the shared side of that lock. A
-readable process referencing a runtime still retains it. Legacy Python runtimes, incomplete
+quarantining an old directory. Unknown registration or tunnel evidence removes
+nothing. A process whose image cannot be read does not veto pruning when the
+exclusive runtime usage lock can be acquired, since a native runtime started
+from its own directory holds the shared side of that lock: on Windows a
+process that refuses `OpenProcess`, on Linux one whose `exe` link refuses this
+account (a non-dumpable process), on macOS one that `ps` names without a path.
+On Windows a readable image that is not an absolute path, and on macOS a
+pathless name that is the runtime's own file name, remove nothing. A readable
+process referencing a runtime still retains it. Legacy Python runtimes, incomplete
 directories and malformed markers are always retained for explicit recovery.
 
 Registration migration backs up each changed file privately, preserves unrelated

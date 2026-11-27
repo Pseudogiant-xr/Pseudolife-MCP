@@ -3,8 +3,9 @@ use std::collections::BTreeSet;
 
 /// `(pid, parent pid, image)`. An empty image records a PID whose image could
 /// not be read (a Windows process that refuses `OpenProcess`, a Linux process
-/// whose `exe` link refuses this account); it supplies tunnel liveness, never
-/// a path pin, and the exclusive usage lock decides removal.
+/// whose `exe` link refuses this account, a macOS process `ps` names without a
+/// path); it supplies tunnel liveness, never a path pin, and the exclusive
+/// usage lock decides removal.
 pub type Process = (u32, u32, PathBuf);
 #[derive(Clone, Debug)]
 pub struct Evidence {
@@ -55,10 +56,12 @@ fn verify_process_evidence(rows: &mut Vec<Process>) -> Result<()> {
         match fs::read_link(path.join("exe")) {
             Ok(image) => rows.push((pid, 0, image)),
             // A same-account process that made itself non-dumpable (ssh-agent,
-            // gpg-agent, a browser sandbox) refuses its `exe` link. As on
-            // Windows, keep its pid for tunnel liveness and let the exclusive
-            // usage lock decide, since every process running a native runtime
-            // holds that lock shared for its whole life.
+            // a browser sandbox) refuses its `exe` link. Like a Windows PID
+            // that refuses `OpenProcess`, it keeps its pid for tunnel liveness
+            // and the exclusive usage lock decides: a native runtime started
+            // from its own directory locks itself before it dispatches and
+            // holds the lock until it exits, and no runtime makes itself
+            // non-dumpable.
             Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
                 rows.push((pid, 0, PathBuf::new()));
             }
@@ -187,12 +190,22 @@ fn append_macos_process_images(rows: &mut Vec<Process>, bytes: &[u8]) -> Result<
         // `comm` is an absolute image path only for some processes: ps prints
         // a bare name for a process started through PATH (`awk`, `node`), a
         // login shell's "-zsh", a system daemon or driver and a zombie's
-        // "<defunct>" (hosted macos-15, 27 November 2026). As on Windows and
-        // Linux, such a row keeps its pid for tunnel liveness and the
-        // exclusive usage lock decides, since every process running a native
-        // runtime holds that lock shared for its whole life.
+        // "<defunct>" (hosted macos-15, 27 November 2026). Such a row keeps
+        // its pid for tunnel liveness and the exclusive usage lock decides,
+        // since a native runtime started from its own directory locks itself
+        // before it dispatches. One that is not (a user's symlink to it found
+        // through PATH, another data home) holds no lock, and ps names it by
+        // the runtime's own file name, so that name still removes nothing.
         let image = if image.starts_with('/') {
             PathBuf::from(image)
+        } else if Path::new(image)
+            .file_name()
+            .is_some_and(|name| name == BINARY)
+        {
+            return Err(
+                "a process names the native runtime without its path; no runtime was removed"
+                    .into(),
+            );
         } else {
             PathBuf::new()
         };
