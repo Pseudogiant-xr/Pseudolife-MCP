@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-macos",
+  "before": "e3799ac5656e30db",
+  "fingerprint": "2bd3e8d8a830efae",
+  "reason": "adds tests/test_shim_autostart_native_default.py: 16 bash and pwsh cases with a stub launcher, 9.5 s on the first Linux dev box (27 Nov 2026), well inside the lane's timeout headroom"
+}
