@@ -154,8 +154,8 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    PyPI-based updaters can obtain the archives once the wheel becomes
    visible. Native GitHub discovery waits for `RELEASE-READY.json`, which
    the workflow attaches only after the approved `publish` job and both
-   image jobs succeed, so the daemon, PostgreSQL and Rust daemon images
-   are all published. A manual wheel upload does not create the readiness
+   image jobs succeed, so the PostgreSQL and Rust daemon images are both
+   published. A manual wheel upload does not create the readiness
    marker.
    If the wheel build fails, the native assets can still attach to the
    public release before approval. Explicit tags and daemons with the
@@ -187,15 +187,15 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=pseudolife"`.
 5. **GHCR images — automated.** The `images` job in `release.yml` (also
    downstream of the human-approved `publish` gate) builds and pushes
-   `ghcr.io/pseudogiant-xr/pseudolife-daemon:{<version>,latest}` and
    `ghcr.io/pseudogiant-xr/pseudolife-pg:{18,18-<version>}` with the
-   repo-scoped `GITHUB_TOKEN` — no stored secret. The compose overlay
-   `ops/docker-compose.ghcr.yml` is the consumer (pull-not-build installs);
-   the base compose file and `ops/update.ps1`'s local-build deploy flow are
-   untouched. One-time after the FIRST release that runs the job: flip both
-   packages to public in their GHCR package settings, or pulls fail with
+   repo-scoped `GITHUB_TOKEN` — no stored secret. Since 0.26.0 no release
+   publishes the retired Python daemon image
+   `ghcr.io/pseudogiant-xr/pseudolife-daemon` (its earlier tags stay, and
+   legacy bank imports run the archived 0.23.1 image by digest), so do not
+   look for it. One-time after the FIRST release that runs the job: flip the
+   package to public in its GHCR package settings, or pulls fail with
    "denied". Verify:
-   `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>`.
+   `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-pg:18-<version>`.
 
    **Rust artifacts.** One repository variable, disabled when unset, gates
    the Rust image, and its publication remains downstream of the human-approved
@@ -232,7 +232,7 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    Verify a published image with
    `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>`
    and flip its GHCR package to public after the first release that runs
-   the job, as for the Python image.
+   the job, as for the PostgreSQL image.
 
    Run the build-only `release.yml` workflow dispatch on the candidate
    first. The native build and bundle jobs must compile and execute the
@@ -263,7 +263,7 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    before any removal. If the marker job fails in a way a re-run cannot clear
    (it runs the tagged commit's own script, so a fault in it repeats), the
    maintainer chooses between attaching a hand-built `RELEASE-READY.json` with
-   `gh release upload` after checking the three images by hand, and cutting a
+   `gh release upload` after checking the two images by hand, and cutting a
    patch release. If approval is declined, the marker stays absent and native
    GitHub discovery withholds the release. Older consumers and explicit tags
    still use their existing routes. To abandon a version after declining approval,

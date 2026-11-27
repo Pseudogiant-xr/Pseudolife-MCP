@@ -136,31 +136,23 @@ jobs:
     timeout-minutes: 45
     # Downstream of the human-approved `publish` gate, like `registry`:
     # publishing the GitHub release remains the single action that lands
-    # every public surface. Pushes the prebuilt daemon + pg images so the
-    # Docker tier can pull instead of building locally.
+    # every public surface. Pushes the prebuilt pg image so the Docker tier
+    # can pull instead of building locally. The Python daemon is retired:
+    # from 0.26.0 no release builds or pushes `pseudolife-daemon`; earlier
+    # tags stay in GHCR, and the archived 0.23.1 image that legacy bank
+    # imports run is pinned by digest in the updater.
     #
     # One-time setup after the FIRST release that runs this job: GHCR
-    # packages are created private — flip pseudolife-daemon and
-    # pseudolife-pg to public in the package settings (Packages → the
-    # package → Package settings → Change visibility), or every pull
-    # fails with "denied".
+    # packages are created private — flip pseudolife-pg to public in the
+    # package settings (Packages → the package → Package settings → Change
+    # visibility), or every pull fails with "denied".
     permissions:
       contents: read
       packages: write
     outputs:
-      daemon-digest: ${{ steps.daemon.outputs.digest }}
       pg-digest: ${{ steps.pg.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Free runner disk for the daemon image build
-        # The daemon image bakes torch (CPU) + the embedding models —
-        # a multi-GB build that can exhaust the default runner disk once
-        # build layers and the exported image coexist. Dropping the
-        # preinstalled toolchains we don't use buys ~30 GB.
-        run: |
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h /
 
       - name: Resolve version and image names
         # GHCR requires lowercase repository paths; the owner is
@@ -168,7 +160,6 @@ jobs:
         run: |
           echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           echo "OWNER_LC=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
-          echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -177,24 +168,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push the daemon image
-        id: daemon
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ops/Dockerfile.daemon
-          push: true
-          # The same build stamp ops/update.ps1 passes (image labels +
-          # /health's `build` block). The checkout is clean by construction.
-          build-args: |
-            GIT_SHA=${{ github.sha }}
-            GIT_DIRTY=false
-            BUILD_TIME=${{ env.BUILD_TIME }}
-            BUILD_SOURCE=release
-          tags: |
-            ghcr.io/${{ env.OWNER_LC }}/pseudolife-daemon:${{ env.VERSION }}
-            ghcr.io/${{ env.OWNER_LC }}/pseudolife-daemon:latest
 
       - name: Build and push the pg image
         id: pg
@@ -209,9 +182,8 @@ jobs:
             ghcr.io/${{ env.OWNER_LC }}/pseudolife-pg:18
             ghcr.io/${{ env.OWNER_LC }}/pseudolife-pg:18-${{ env.VERSION }}
 
-      - name: Verify the pushed images are pullable by digest
+      - name: Verify the pushed image is pullable by digest
         run: |
-          docker buildx imagetools inspect "ghcr.io/${OWNER_LC}/pseudolife-daemon:${VERSION}"
           docker buildx imagetools inspect "ghcr.io/${OWNER_LC}/pseudolife-pg:18-${VERSION}"
 
   # The repository variable gates publishing this image. Since 0.23.0 install and
@@ -389,7 +361,6 @@ jobs:
       - name: Attach the release readiness marker
         env:
           GH_TOKEN: ${{ github.token }}
-          DAEMON_IMAGE_DIGEST: ${{ needs.images.outputs.daemon-digest }}
           PG_IMAGE_DIGEST: ${{ needs.images.outputs.pg-digest }}
           RUST_IMAGE_DIGEST: ${{ needs.rust-image.outputs.digest }}
         run: python rust/ci/release_assets.py publish-ready
