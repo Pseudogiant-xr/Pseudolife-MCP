@@ -910,14 +910,15 @@ fn a_fifo_in_the_installed_runtime_is_refused_without_blocking() {
     broken_install_is_refused("not an owner-only regular file", |folder, _| {
         let path = folder.join("LICENSE");
         fs::remove_file(&path).unwrap();
-        // mkfifoat, not mknodat: rustix has no mknodat on Apple targets, and
-        // with it this crate's lib tests did not compile on macOS.
-        rustix::fs::mkfifoat(
-            rustix::fs::CWD,
-            &path,
-            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
-        )
-        .unwrap();
+        // The mkfifo command, not rustix: rustix has neither mknodat nor
+        // mkfifoat on Apple targets, so this crate's lib tests did not
+        // compile on macOS (hosted macos-15, 27 November 2026).
+        let made = std::process::Command::new("mkfifo")
+            .args(["-m", "600"])
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(made.success(), "mkfifo {}: {made}", path.display());
     });
 }
 
