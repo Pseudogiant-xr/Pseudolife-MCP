@@ -163,60 +163,22 @@ fn platform_defaults() -> (Option<String>, Option<PathBuf>) {
 }
 
 /// The account name in `buffer` (NUL-terminated UTF-16), as the default
-/// PostgreSQL user.
+/// PostgreSQL user. Read from the wide call, not `GetUserNameA` as libpq
+/// does: an ANSI name is in the system code page, never UTF-8, so a
+/// non-ASCII account name decoded to nothing (or to `?` outside the code
+/// page), and `tokio-postgres` sends the user as UTF-8.
 #[cfg(windows)]
-#[allow(unsafe_code)]
 fn user_from_wide(buffer: &[u16]) -> Option<String> {
-    String::from_utf8(ansi_bytes(until_nul(buffer)?)?).ok()
+    String::from_utf16(until_nul(buffer)?).ok()
 }
 
-/// The folder in `buffer` (NUL-terminated UTF-16).
+/// The folder in `buffer` (NUL-terminated UTF-16), whatever the system code
+/// page can spell, so a profile folder named for a non-ASCII account keeps
+/// its real name.
 #[cfg(windows)]
-#[allow(unsafe_code)]
 fn path_from_wide(buffer: &[u16]) -> Option<PathBuf> {
     use std::{ffi::OsString, os::windows::ffi::OsStringExt};
-    use windows_sys::Win32::Globalization::{CP_ACP, MultiByteToWideChar};
-    let bytes = ansi_bytes(until_nul(buffer)?)?;
-    let mut wide = [0; 260];
-    let written = unsafe {
-        MultiByteToWideChar(
-            CP_ACP,
-            0,
-            bytes.as_ptr(),
-            bytes.len() as i32,
-            wide.as_mut_ptr(),
-            wide.len() as i32,
-        )
-    };
-    (written > 0).then(|| PathBuf::from(OsString::from_wide(&wide[..written as usize])))
-}
-
-/// What the ANSI calls (`GetUserNameA`, `SHGetFolderPathA`) return for this
-/// text: its bytes in the system code page.
-#[cfg(windows)]
-#[allow(unsafe_code)]
-fn ansi_bytes(wide: &[u16]) -> Option<Vec<u8>> {
-    use windows_sys::Win32::Globalization::{CP_ACP, WideCharToMultiByte};
-    if wide.is_empty() {
-        return Some(Vec::new());
-    }
-    let mut bytes = vec![0u8; wide.len() * 4];
-    let written = unsafe {
-        WideCharToMultiByte(
-            CP_ACP,
-            0,
-            wide.as_ptr(),
-            wide.len() as i32,
-            bytes.as_mut_ptr(),
-            bytes.len() as i32,
-            std::ptr::null(),
-            std::ptr::null_mut(),
-        )
-    };
-    (written > 0).then(|| {
-        bytes.truncate(written as usize);
-        bytes
-    })
+    Some(PathBuf::from(OsString::from_wide(until_nul(buffer)?)))
 }
 
 #[cfg(windows)]
