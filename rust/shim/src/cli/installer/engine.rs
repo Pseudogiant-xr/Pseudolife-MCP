@@ -1103,11 +1103,9 @@ mod tests {
             cause(&refused.message),
             "Cannot read a release version from this checkout's rust/shim/Cargo.toml (its [package] version is 0.26.0.dev1, not a plain release)"
         );
-        assert!(
-            refused
-                .message
-                .contains("check out a release tag (git checkout v<version>) and rerun. Nothing was started.")
-        );
+        assert!(refused.message.contains(
+            "check out a release tag (git checkout v<version>) and rerun. Nothing was started."
+        ));
         // No plain version at all (a deleted line, version.workspace): the
         // message names the line it needs and the repair, not a release tag
         // (a checkout of a tag would refuse the local change or keep it).
