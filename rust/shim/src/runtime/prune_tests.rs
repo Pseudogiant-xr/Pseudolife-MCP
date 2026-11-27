@@ -319,3 +319,130 @@ fn a_record_whose_name_differs_only_in_case_still_pins_its_runtime() {
     let pinned = tunnel_runtimes(&f.layout, &root, &evidence.processes).unwrap();
     assert!(pinned.contains(&old.path), "{pinned:?}");
 }
+
+/// Set by [`linux_nondumpable_child`]'s parent: run as the helper process.
+#[cfg(target_os = "linux")]
+const NONDUMPABLE_CHILD: &str = "PSEUDOLIFE_PRUNE_TEST_NONDUMPABLE_CHILD";
+
+/// The helper half of the non-dumpable tests: a same-account process that
+/// makes itself non-dumpable, as ssh-agent and gpg-agent do, and then waits
+/// for its parent to close stdin. A no-op in an ordinary test run.
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_nondumpable_child() {
+    if std::env::var_os(NONDUMPABLE_CHILD).is_none() {
+        return;
+    }
+    rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable)
+        .unwrap();
+    let _ = io::Read::read(&mut io::stdin(), &mut [0u8; 1]);
+}
+
+/// A same-account non-dumpable process whose `exe` link refuses this account,
+/// stopped and reaped on drop.
+#[cfg(target_os = "linux")]
+struct Nondumpable(std::process::Child);
+
+#[cfg(target_os = "linux")]
+impl Nondumpable {
+    fn spawn() -> Self {
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "runtime::prune::tests::linux_nondumpable_child",
+                "--test-threads=1",
+                "--quiet",
+            ])
+            .env(NONDUMPABLE_CHILD, "1")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let child = Self(child);
+        let exe = Path::new("/proc").join(child.0.id().to_string()).join("exe");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            match fs::read_link(&exe) {
+                Err(e) if e.kind() == io::ErrorKind::PermissionDenied => return child,
+                _ if std::time::Instant::now() > deadline => {
+                    panic!("the helper never became non-dumpable ({})", exe.display())
+                }
+                _ => std::thread::sleep(std::time::Duration::from_millis(20)),
+            }
+        }
+    }
+
+    fn pid(&self) -> u32 {
+        self.0.id()
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for Nondumpable {
+    fn drop(&mut self) {
+        drop(self.0.stdin.take());
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_nondumpable_linux_process_is_liveness_evidence_not_a_refusal() {
+    let child = Nondumpable::spawn();
+    let mut rows = vec![];
+    verify_process_evidence(&mut rows).expect("a non-dumpable process must not stop pruning");
+    assert!(
+        rows.iter()
+            .any(|(pid, _, image)| *pid == child.pid() && image.as_os_str().is_empty()),
+        "the non-dumpable pid is kept, with no image: {rows:?}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_nondumpable_linux_process_leaves_removal_to_the_usage_lock() {
+    let f = Fixture::new();
+    let old = f.install("1.0.0");
+    let current = f.install("1.0.1");
+    let _child = Nondumpable::spawn();
+    let evidence = || {
+        let mut processes = vec![];
+        verify_process_evidence(&mut processes).unwrap();
+        Evidence {
+            processes,
+            registrations: BTreeSet::new(),
+            tunnels: BTreeSet::new(),
+        }
+    };
+    let pin = launch::pin(&old).unwrap();
+    let report = f.prune(Ok(evidence()));
+    assert_eq!(report["removed"], json!([]), "{report}");
+    assert_eq!(report["held"][0]["path"], json!(old.path), "{report}");
+    assert!(old.path.is_dir());
+    drop(pin);
+    let report = f.prune(Ok(evidence()));
+    assert_eq!(report["removed"], json!([old.path]), "{report}");
+    assert!(current.path.is_dir());
+}
+
+/// The live table of this Mac, as `ps` prints it to this account, is
+/// evidence pruning can act on: no row of an ordinary host refuses it.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_live_macos_process_table_is_pruning_evidence() {
+    let output = std::process::Command::new("/bin/ps")
+        .args(["-axo", "pid=,ppid=,comm="])
+        .output()
+        .unwrap();
+    let mut rows = vec![];
+    let verdict = verify_process_evidence(&mut rows);
+    let refused: Vec<_> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| {
+            append_macos_process_images(&mut vec![], format!("{line}\n").as_bytes()).is_err()
+        })
+        .map(str::to_owned)
+        .collect();
+    assert!(verdict.is_ok(), "{verdict:?}; rows it refuses: {refused:#?}");
+}
