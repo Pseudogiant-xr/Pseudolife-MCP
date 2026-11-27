@@ -424,11 +424,12 @@ sidecar entirely; `ops\install.ps1 -Extractor ...` on Windows). The manual
 steps:
 
 1. Register the CLI shim to start automatically — requires a logged-in
-   `claude` CLI. Both scripts below use the installed native client (what
-   the installers set up, no Python needed) and run its
-   `pseudolife-mcp extractor-shim install-autostart claude`, as the
-   installers do; `--python` / `-PythonExe` picks the older Python runner
-   (`evals/claude_shim.py`) instead:
+   `claude` CLI. On a machine without Python, both scripts below register
+   through the installed native client (`pseudolife-mcp extractor-shim
+   install-autostart claude`, as the installers do). Where Python is on
+   `PATH` they keep the Python runner (`evals/claude_shim.py`) and print the
+   `--native` / `-NativeExe` command that registers the native client
+   instead:
    - Windows: `ops\install-shim-autostart.ps1` (Task Scheduler, at your
      logon, `127.0.0.1:8082`; run it from a normal PowerShell 7 window, no
      elevation: the task is registered for your user only, with a limited

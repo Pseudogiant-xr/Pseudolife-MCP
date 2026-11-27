@@ -333,8 +333,8 @@ Choose one path, then redeploy with the same env file:
 - **Claude or Codex CLI shim:** from the client checkout run
   `ops/install-shim-autostart.sh` (Claude) or
   `ops/install-codex-shim-autostart.sh` (Codex), optionally with `--model`.
-  These register a Linux user service through the installed native client,
-  with no Python needed; Windows has matching `.ps1` scripts.
+  These register a Linux user service, through the installed native client
+  on a host without Python; Windows has matching `.ps1` scripts.
   Set the stack's
   `PSEUDOLIFE_DREAM_BASE_URL` to `http://host.docker.internal:8082/v1`
   (Claude) or `http://host.docker.internal:8086/v1` (Codex), and

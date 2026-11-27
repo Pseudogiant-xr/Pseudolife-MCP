@@ -1,13 +1,15 @@
 """The standalone shim autostart wrappers register the shim through the
-installed native client, so a host without Python can run them.
+installed native client on a host without Python.
 
 `ops/install-shim-autostart.*` and `ops/install-codex-shim-autostart.*` used
 the native client only when `--native` / `-NativeExe` named it; otherwise
 they needed Python to pick the unit's interpreter and refused without it,
-telling the user to install Python. They now find the native launcher where
-the installers put it (or `PSEUDOLIFE_SHIM_LAUNCHER`), check that it answers
-as a native client, and run its `extractor-shim install-autostart`, as the
-installers do. `--python` / `-PythonExe` still picks the Python runner.
+telling the user to install Python. Where no Python is on PATH they now find
+the native launcher where the installers put it (or
+`PSEUDOLIFE_SHIM_LAUNCHER`), check that it answers as a native client, and
+run its `extractor-shim install-autostart`, as the installers do. A host
+with Python keeps the Python runner and is told the `--native` command,
+since switching a registered runner is the user's choice.
 """
 from __future__ import annotations
 
@@ -98,7 +100,7 @@ def test_sh_wrapper_registers_through_the_installed_native_client_without_python
     assert recorded[:3] == ["extractor-shim", "install-autostart", family], recorded
     assert recorded[recorded.index("--repo") + 1] == str(root)
     assert recorded[recorded.index("--native-exe") + 1] == str(launcher)
-    assert "Using the installed native client" in proc.stdout + proc.stderr
+    assert "registering through the installed native client" in proc.stdout + proc.stderr
 
 
 @pytest.mark.skipif(BASH is None, reason="bash wrappers run on Linux and macOS")
@@ -118,8 +120,27 @@ def test_sh_wrapper_python_flag_keeps_the_python_runner(tmp_path, family):
     # installed native client is not used.
     launcher = _stub(_default_launcher(tmp_path))
     _, proc = _run_sh(tmp_path, family, "--python", str(tmp_path / "no-such-python"))
-    assert proc.returncode != 0
+    assert proc.returncode == 1
     assert not (launcher.parent / "launcher-args").exists()
+    assert "drop --python" in proc.stderr, proc.stderr
+
+
+@pytest.mark.skipif(BASH is None, reason="bash wrappers run on Linux and macOS")
+@pytest.mark.parametrize("family", sorted(FAMILIES))
+def test_sh_wrapper_on_a_host_with_python_keeps_the_python_runner_and_names_the_switch(tmp_path, family):
+    # The other near miss: Python on PATH keeps the runner the host has; the
+    # wrapper prints the one command that switches it instead of switching.
+    launcher = _stub(_default_launcher(tmp_path))
+    root = _checkout(tmp_path, FAMILIES[family] + ".sh")
+    tools = _tool_dir(tmp_path)
+    (tools / "python3").write_text(f"#!{shutil.which('bash')}\nexit 1\n", encoding="utf-8")
+    (tools / "python3").chmod(0o755)
+    script = root / "ops" / (FAMILIES[family] + ".sh")
+    proc = subprocess.run([BASH, str(script)], capture_output=True, text=True, timeout=60,
+                          env={"HOME": str(tmp_path / "home"), "PATH": str(tools)})
+    assert proc.returncode == 1
+    assert not (launcher.parent / "launcher-args").exists()
+    assert f"{script} --native {launcher}" in proc.stdout, proc.stdout
 
 
 @pytest.mark.skipif(BASH is None, reason="bash wrappers run on Linux and macOS")
@@ -145,7 +166,7 @@ def test_sh_wrapper_without_systemd_names_the_native_shim(tmp_path, family):
                           text=True, timeout=60, env={"HOME": str(tmp_path / "home"), "PATH": str(tools)})
     assert proc.returncode == 1
     assert f"extractor-shim {family} --repo {root}" in proc.stderr, proc.stderr
-    assert "python" not in proc.stderr.lower()
+    assert "evals/" not in proc.stderr
 
 
 def _recorded(launcher: Path) -> str:
@@ -154,10 +175,22 @@ def _recorded(launcher: Path) -> str:
     return " ".join((launcher.parent / "launcher-args").read_text(encoding="utf-8").split())
 
 
-def _run_ps1(tmp_path, family, *args, launcher_env=None):
+def _run_ps1(tmp_path, family, *args, launcher_env=None, python=False):
     root = _checkout(tmp_path, FAMILIES[family] + ".ps1")
     env = dict(os.environ)
     env.pop("PSEUDOLIFE_SHIM_LAUNCHER", None)
+    # No Python on PATH, unless the case gives one that fails as an
+    # interpreter would for a missing picker.
+    bin_dir = tmp_path / "ps-bin"
+    bin_dir.mkdir(exist_ok=True)
+    env["PATH"] = os.pathsep.join([str(bin_dir)] + ([os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")]
+                                                     if os.name == "nt" else []))
+    if python:
+        if os.name == "nt":
+            (bin_dir / "python.cmd").write_text("@exit /b 1\r\n", encoding="utf-8")
+        else:
+            (bin_dir / "python").write_text(f"#!{shutil.which('bash')}\nexit 1\n", encoding="utf-8")
+            (bin_dir / "python").chmod(0o755)
     env["LOCALAPPDATA"] = str(tmp_path / "local")
     env["USERPROFILE"] = str(tmp_path / "home")
     if launcher_env:
@@ -192,8 +225,20 @@ def test_ps1_wrapper_finds_the_launcher_where_the_installer_puts_it(tmp_path, fa
 @pytest.mark.parametrize("family", sorted(FAMILIES))
 def test_ps1_wrapper_python_flag_keeps_the_python_runner(tmp_path, family):
     launcher = _stub(tmp_path / "elsewhere" / "pseudolife-mcp")
-    _run_ps1(tmp_path, family, "-PythonExe", str(tmp_path / "no-such-python"), launcher_env=str(launcher))
+    _, proc = _run_ps1(tmp_path, family, "-PythonExe", str(tmp_path / "no-such-python"), launcher_env=str(launcher))
+    assert proc.returncode != 0
     assert not (launcher.parent / "launcher-args").exists()
+    assert "drop -PythonExe" in proc.stdout + proc.stderr, proc.stdout + proc.stderr
+
+
+@pytest.mark.skipif(PWSH is None, reason="pwsh not available")
+@pytest.mark.parametrize("family", sorted(FAMILIES))
+def test_ps1_wrapper_on_a_host_with_python_keeps_the_python_runner_and_names_the_switch(tmp_path, family):
+    launcher = _stub(tmp_path / "elsewhere" / "pseudolife-mcp")
+    _, proc = _run_ps1(tmp_path, family, launcher_env=str(launcher), python=True)
+    assert proc.returncode != 0
+    assert not (launcher.parent / "launcher-args").exists()
+    assert f"-NativeExe '{launcher}'" in proc.stdout, proc.stdout + proc.stderr
 
 
 def test_the_guides_no_longer_tell_users_to_run_the_python_shims():
@@ -201,5 +246,3 @@ def test_the_guides_no_longer_tell_users_to_run_the_python_shims():
         text = (ROOT / rel).read_text(encoding="utf-8")
         assert "python evals/" not in text, rel
         assert "python $repo/evals/" not in text, rel
-    for rel in ("ops/install-shim-autostart.sh", "ops/install-codex-shim-autostart.sh"):
-        assert "python $repo/evals/" not in (ROOT / rel).read_text(encoding="utf-8"), rel

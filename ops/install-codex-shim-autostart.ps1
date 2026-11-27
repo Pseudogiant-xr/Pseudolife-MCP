@@ -64,8 +64,11 @@ $repo = Split-Path -Parent $PSScriptRoot
 $LogFile = [IO.Path]::GetFullPath($LogFile, (Get-Location).ProviderPath)
 
 . (Join-Path $PSScriptRoot "scheduled_task_lock.ps1")
-# With neither -NativeExe nor -PythonExe, use the installed native client, as
-# the installers do: it registers the shim itself, with no Python involved.
+# The installed native client registers the shim itself, with no Python
+# involved, as the installers use it. With neither -NativeExe nor -PythonExe
+# it is the runner only where no Python is on PATH: a host that has Python
+# keeps the Python runner, since switching a registered runner is the user's
+# choice, and is told the command that switches it.
 if (-not $NativeExe -and -not $PythonExe) {
     $launcher = $env:PSEUDOLIFE_SHIM_LAUNCHER
     if (-not $launcher) {
@@ -74,9 +77,13 @@ if (-not $NativeExe -and -not $PythonExe) {
     }
     if (Test-Path -LiteralPath $launcher -PathType Leaf) {
         $answer = try { & $launcher update --native-capability 2>$null } catch { $null }
-        if ($LASTEXITCODE -eq 0 -and "$answer".Trim() -eq 'pseudolife-mcp native-update-v1') {
-            $NativeExe = $launcher
-            Write-Host "Using the installed native client $launcher (-PythonExe picks the Python runner instead)."
+        if ($LASTEXITCODE -eq 0 -and "$answer".Trim() -ceq 'pseudolife-mcp native-update-v1') {
+            if (-not (Get-Command python -ErrorAction SilentlyContinue) -and -not (Get-Command py -ErrorAction SilentlyContinue)) {
+                $NativeExe = $launcher
+                Write-Host "No Python on PATH; registering through the installed native client $launcher."
+            } else {
+                Write-Host "To register through the installed native client instead (no Python needed): & '$PSCommandPath' -NativeExe '$launcher'"
+            }
         }
     }
 }
@@ -145,7 +152,10 @@ if (-not $CodexCli) {
 # the CLI check: a missing CLI fails faster than a venv build.
 $helperPython = (Get-Command python -ErrorAction SilentlyContinue).Source
 if (-not $helperPython -and -not (Get-Command py -ErrorAction SilentlyContinue)) {
-    throw "no native client answered (looked for pseudolife-mcp.exe under %LOCALAPPDATA%\pseudolife-mcp\bin, or PSEUDOLIFE_SHIM_LAUNCHER) and no python is on PATH: install the native client with ops\install.ps1 (which registers this shim itself) or pass -NativeExe <its path>, then re-run."
+    if ($PythonExe) {
+        throw "no python on PATH to run ops\shim_python.py, which checks the -PythonExe interpreter; put one on PATH, or drop -PythonExe to register through the native client."
+    }
+    throw "no python on PATH and no native client answered (pseudolife-mcp.exe under %LOCALAPPDATA%\pseudolife-mcp\bin, or PSEUDOLIFE_SHIM_LAUNCHER): install the native client with ops\install.ps1, or pass -NativeExe <its path>, then re-run."
 }
 $pickerArgs = @((Join-Path $PSScriptRoot "shim_python.py"), "--repo", $repo)
 if ($PythonExe) { $pickerArgs += @("--python", $PythonExe) }

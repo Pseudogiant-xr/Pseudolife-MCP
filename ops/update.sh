@@ -22,7 +22,7 @@
 #                                      # Postgres login (made when it is
 #                                      # missing and the bundled Postgres
 #                                      # runs here: a contributor's host)
-#   ops/update.sh --clients-only       # not here: pseudolife-mcp update --clients-only
+#   ops/update.sh --clients-only       # not here: python ops/update_clients.py, or pseudolife-mcp update --clients-only for a release
 #
 # HEALTH_RETRIES / HEALTH_DELAY_MS (environment) size the health wait.
 #
@@ -63,7 +63,7 @@ while [ $# -gt 0 ]; do
         --allow-dirty)    args+=(--allow-dirty); shift ;;
         --no-test-login)  args+=(--no-test-login); shift ;;
         --clients-only)   # a release-mode option of `pseudolife-mcp update`
-            echo "--clients-only is a release-mode option; a checkout deploy builds what the tree holds (for the clients alone: pseudolife-mcp update --clients-only)" >&2
+            echo "--clients-only is a release-mode option; a checkout deploy builds what the tree holds (for the clients alone: python ops/update_clients.py installs this checkout's clients; pseudolife-mcp update --clients-only installs the newest release's)" >&2
             exit 2 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
