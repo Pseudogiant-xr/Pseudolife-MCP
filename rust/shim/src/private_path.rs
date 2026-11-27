@@ -413,11 +413,20 @@ const SYSTEMD_LOCAL_SERVICES: [&str; 4] = [
 ];
 
 /// Ids systemd hands out or synthesizes itself, never a user's private
-/// group here: `DynamicUser=` (61184-65519, systemd's `docs/UIDS-GIDS.md`)
-/// and the foreign range (0x7FFE0000-0x7FFEFFFF).
+/// group here (systemd's `docs/UIDS-GIDS.md`; real user-private-group ids
+/// sit below 60000): `DynamicUser=` (61184-65519); `nobody` (65534, which
+/// nss-systemd synthesizes as a primary group when `/etc/passwd` lacks it)
+/// and 65535; containers (0x80000-0x6FFFFFFF: `--private-users=pick` checks
+/// only a range's base); systemd-nsresourced (0x70000000-0x7FFDFFFF); and
+/// the foreign range (0x7FFE0000-0x7FFEFFFF).
 #[cfg(unix)]
-const SYSTEMD_RANGES: [std::ops::RangeInclusive<u32>; 2] =
-    [61184..=65519, 0x7FFE_0000..=0x7FFE_FFFF];
+const SYSTEMD_RANGES: [std::ops::RangeInclusive<u32>; 5] = [
+    61184..=65519,
+    65534..=65535,
+    0x0008_0000..=0x6FFF_FFFF,
+    0x7000_0000..=0x7FFD_FFFF,
+    0x7FFE_0000..=0x7FFE_FFFF,
+];
 
 /// Where glibc may read `nsswitch.conf`, relative to the root: openSUSE's
 /// glibc falls back to `/usr/etc` when `/etc` has none.

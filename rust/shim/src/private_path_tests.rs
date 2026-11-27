@@ -974,11 +974,20 @@ mod posix {
             "io.systemd.Home",
             "io.systemd.Machine",
             "org.example.Directory",
+            ".hidden",
         ] {
             fs::write(services.join(other), "").unwrap();
             assert!(!trusted(), "{other}");
             fs::remove_file(services.join(other)).unwrap();
         }
+        // A plain file where the folder should be cannot be listed.
+        let kept = root.join("run/systemd/userdb-kept");
+        fs::rename(&services, &kept).unwrap();
+        fs::write(&services, "").unwrap();
+        assert!(!trusted(), "a plain file in place of the userdb folder");
+        fs::remove_file(&services).unwrap();
+        fs::rename(&kept, &services).unwrap();
+        assert!(trusted(), "the folder back");
         // Any drop-in record, a membership above all.
         for (dir, record) in [
             ("etc/userdb", "other:me.membership"),
@@ -1006,15 +1015,28 @@ mod posix {
 
     #[test]
     fn a_gid_systemd_hands_out_or_synthesizes_is_never_private() {
-        for id in [61184_u32, 61200, 65519, 0x7FFE_0000, 0x7FFE_FFFF] {
+        // DynamicUser=, nobody and 65535, containers, nsresourced, foreign.
+        for id in [
+            61184_u32,
+            61200,
+            65519,
+            65534,
+            65535,
+            0x0008_0000,
+            0x6FFF_FFFF,
+            0x7000_0000,
+            0x7FFD_FFFF,
+            0x7FFE_0000,
+            0x7FFE_FFFF,
+        ] {
             let accounts = Accounts::from_text(
                 &format!("me:x:{id}:{id}::/home/me:/bin/sh\n"),
                 &format!("me:x:{id}:\n"),
             );
-            assert!(!accounts.private_group(id, id), "{id}");
+            assert!(!accounts.private_group(id, id), "{id:#x}");
         }
         // The ids either side are ordinary.
-        for id in [61183_u32, 65520] {
+        for id in [61183_u32, 65520, 65533, 65536, 0x0007_FFFF, 0x7FFF_0000] {
             let accounts = Accounts::from_text(
                 &format!("me:x:{id}:{id}::/home/me:/bin/sh\n"),
                 &format!("me:x:{id}:\n"),
