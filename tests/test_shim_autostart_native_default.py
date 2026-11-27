@@ -100,6 +100,9 @@ def test_sh_wrapper_registers_through_the_installed_native_client_without_python
     assert recorded[:3] == ["extractor-shim", "install-autostart", family], recorded
     assert recorded[recorded.index("--repo") + 1] == str(root)
     assert recorded[recorded.index("--native-exe") + 1] == str(launcher)
+    # No docker0 here (no `ip` at all): no bridge address is guessed, so the
+    # native client binds its loopback default.
+    assert "--host" not in recorded, recorded
     assert "registering through the installed native client" in proc.stdout + proc.stderr
 
 
