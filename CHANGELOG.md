@@ -6,7 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.26.0] - 2026-11-27 — The installers and update set up the native client by default and move every Docker host to the Rust daemon, so no machine needs host Python
+## [0.26.0] - 2026-11-27 — The installers and update set up the native client by default and move every Docker host to the Rust daemon, so a new machine needs no host Python
 
 ### Changed (2026-11-27 — `pseudolife-mcp update` moves every Docker host off the retired Python daemon)
 - The Python daemon is retired and gets no more fixes, so a release-mode `pseudolife-mcp update` no longer leaves a host on it. An attended update moves a Python host to the Rust daemon, with the backup, configuration check and any legacy import as before, whatever an earlier `--engine python` recorded. A release that publishes no Rust image, or a move that refuses before its backup, now stops with the refusal and its fix and leaves the Python daemon as it was, instead of updating it in place. The scheduled `--unattended` run holds on a Python host, also one already at the newest release, and asks for one attended update; `--no-backup` is refused there; and release mode refuses `--engine python` (a checkout deploy still takes it). The one run that stays on Python is the explicit bearer handover (`--allow-auth-change`), so a Python daemon that runs without a bearer can get one before it moves; the no-bearer refusal names that step, the command for it and the `connect` that gives the clients the bearer. A Python daemon that does not answer `/health` is told to start first.

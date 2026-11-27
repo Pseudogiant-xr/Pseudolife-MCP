@@ -48,12 +48,17 @@ in release mode (a checkout deploy still takes it). The one run that stays
 on Python is the explicit bearer handover (`--allow-auth-change`): the move
 needs a bearer, so a Python daemon that runs without one first gets it that
 way, and the next attended update moves the host.
-The updater that deploys the daemon is the one already installed. An
-updater older than 0.26.0 cannot update a host that chose the Python daemon
-to 0.26.0: it stops at the pull of a Python image 0.26.0 does not publish,
+From 0.26.0 the installed updater hands the update to the target
+release's updater; an older one deploys with its own rules. An updater
+older than 0.26.0 does not move a host that chose the Python daemon to
+0.26.0: it stops at the pull of a Python image 0.26.0 does not publish,
 with nothing changed. Run
 `pseudolife-mcp update --clients-only && pseudolife-mcp update` there; the
 first command installs the 0.26.0 updater, and the second moves the host.
+A machine that keeps the Python client (`PSEUDOLIFE_SHIM_ENGINE=python`, a
+tunnel the Python client registered to start by itself, or no native
+client for the platform) keeps the frozen Python updater, which stays on
+a recorded Python choice; run `pseudolife-mcp update --engine rust` there.
 When the native updater deploys a Rust daemon over a legacy
 bank, it first runs the archived Python 0.23.1 daemon to finish the
 import. This applies to banks below schema 57, with counters still in

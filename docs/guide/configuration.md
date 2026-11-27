@@ -4867,12 +4867,11 @@ always keeping the newest three of each kind). When the compose files are
 gone AND no env file was found beside them, the update stops unless
 `--env-file` names one: the bundled compose files without the env would
 reset the Postgres password, the volume names and the bearer.
-The rollback is the running image tagged by id as
-`ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>-pre-update-<stamp>`
-(the `pseudolife-daemon` repository for a host still on the Python daemon),
-because the GHCR overlay selects the daemon's image through
-`PSEUDOLIFE_IMAGE_TAG`: the printed rollback is that variable naming the
-tag on the same `docker compose … up -d --no-deps pseudolife-daemon`. A
+The rollback is the running image, tagged by id under its own repository
+(`pseudolife-daemon-rust` on a Rust host, `pseudolife-daemon` on one still
+on the Python daemon) with a `<version>-pre-update-…` tag, and the update
+prints the `docker compose … up -d --no-deps pseudolife-daemon` command
+that redeploys it. A
 daemon that comes back healthy at a version other than the one pulled
 fails the update with that rollback and moves no client. Release mode
 builds nothing, so it prunes no build cache. `PSEUDOLIFE_DOCKER` names

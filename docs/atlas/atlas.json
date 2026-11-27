@@ -1279,7 +1279,7 @@
     "TRUST_BIND=1 is safe: compose publishes loopback-only — the port publish is the security boundary",
     "Override file: swap extractor GGUF or disable the sidecar (profiles)",
     "Daemon mem_limit 6g (memswap pinned equal - no swap; 4g OOM-killed it 2026-09-23); MALLOC_ARENA_MAX=2",
-    "ops/docker-compose.ghcr.yml overlays the GHCR pg image and the retired Python daemon image (frozen at 0.25.x; from 0.26.0 releases use docker-compose.rust-ghcr.yml on top of it, with PSEUDOLIFE_IMAGE_TAG); byte-equal copies ship in pseudolife_memory/compose/ for an update with no checkout"
+    "ops/docker-compose.ghcr.yml overlays the GHCR pg image and the retired Python daemon image (no longer published from 0.26.0; releases from 0.26.0 use docker-compose.rust-ghcr.yml on top of it, with PSEUDOLIFE_IMAGE_TAG); byte-equal copies ship in pseudolife_memory/compose/ for an update with no checkout"
    ]
   },
   {
@@ -1444,7 +1444,7 @@
     "The Docker tier's default daemon since 0.23.0, image ghcr.io/<owner>/pseudolife-daemon-rust:<ver> (debian:bookworm-slim, no Python); a release-mode pseudolife-mcp update moves every Python host to it on the same bank and refuses --engine python; a checkout deploy still takes either engine",
     "Discovers stable GitHub releases with the complete native asset set and RELEASE-READY.json. The native updater uses the same readiness requirement for latest-release discovery.",
     "Requires PSEUDOLIFE_MCP_DATABASE_URL: no file mode and no embedded lite Postgres; models are provisioned at install or first start into the pseudolife_rust_models volume",
-    "The Python daemon (daemon.py) is frozen and retired: a release update moves every host to Rust, and only a checkout deploy or the bearer handover leaves one on it"
+    "The Python daemon (daemon.py) is frozen and retired: a release update from 0.26.0 moves every host to Rust, or refuses or holds before changing anything; only the bearer handover (--allow-auth-change) runs on it"
    ]
   },
   {
