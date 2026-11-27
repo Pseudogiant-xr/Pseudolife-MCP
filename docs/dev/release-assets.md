@@ -49,9 +49,10 @@ its publication job failed.
 
 `RELEASE-READY.json` is separate from the checksum manifest. It contains
 the release `version`, the full tagged `commit` SHA, and an `images` object
-mapping `pseudolife-daemon`, `pseudolife-pg` and `pseudolife-daemon-rust`
-to their published `sha256:` digests. The JSON contains no timestamp or run
-attempt.
+mapping `pseudolife-pg` and `pseudolife-daemon-rust` to their published
+`sha256:` digests. Releases before 0.26.0 also map `pseudolife-daemon`, the
+retired Python daemon image, which 0.26.0 and later no longer publish. The
+JSON contains no timestamp or run attempt.
 These fields give operators a stable record of what the workflow approved
 and published. Discovery uses the marker's asset metadata from GitHub.
 
@@ -248,7 +249,7 @@ Use "Re-run failed jobs" to reuse successful build outputs. Never use
 attachment refuses the new `SHA256SUMS` and PyPI cannot follow until the
 attached assets are deleted. If a rerun
 cannot clear a marker failure, the tagged commit's script still runs on
-each attempt. The maintainer chooses between checking the three published
+each attempt. The maintainer chooses between checking the two published
 images and attaching a hand-built `RELEASE-READY.json` with
 `gh release upload`, or cutting a patch release. If approval is declined,
 the marker stays absent and native GitHub discovery withholds the release.

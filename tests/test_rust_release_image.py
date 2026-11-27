@@ -164,12 +164,9 @@ def test_release_ready_depends_on_the_protected_publish_and_image_jobs(jobs):
     assert_ready_job_dependencies(jobs)
     ready = jobs["release-ready"]
     assert ready["permissions"] == {"contents": "write"}
-    assert jobs["images"]["outputs"] == {
-        "daemon-digest": "${{ steps.daemon.outputs.digest }}",
-        "pg-digest": "${{ steps.pg.outputs.digest }}",
-    }
+    assert jobs["images"]["outputs"] == {"pg-digest": "${{ steps.pg.outputs.digest }}"}
     assert jobs["rust-image"]["outputs"] == {"digest": "${{ steps.daemon.outputs.digest }}"}
-    for name, step_ids in (("images", {"daemon", "pg"}), ("rust-image", {"daemon"})):
+    for name, step_ids in (("images", {"pg"}), ("rust-image", {"daemon"})):
         builds = [s for s in jobs[name]["steps"] if s.get("uses", "").startswith("docker/build-push-action@")]
         assert {s["id"] for s in builds} == step_ids
         assert all(s["with"]["push"] is True for s in builds)
@@ -179,10 +176,23 @@ def test_release_ready_depends_on_the_protected_publish_and_image_jobs(jobs):
     assert len(steps) == 1
     assert steps[0]["env"] == {
         "GH_TOKEN": "${{ github.token }}",
-        "DAEMON_IMAGE_DIGEST": "${{ needs.images.outputs.daemon-digest }}",
         "PG_IMAGE_DIGEST": "${{ needs.images.outputs.pg-digest }}",
         "RUST_IMAGE_DIGEST": "${{ needs.rust-image.outputs.digest }}",
     }
+
+
+def test_releases_publish_no_python_daemon_image(jobs):
+    # The Python daemon is retired: from 0.26.0 no release builds or pushes
+    # its image. The Rust daemon and PostgreSQL images stay.
+    pushed = []
+    for name, job in jobs.items():
+        for step in job.get("steps", []):
+            if step.get("uses", "").startswith("docker/build-push-action@"):
+                assert step["with"]["file"] != "ops/Dockerfile.daemon", name
+                pushed += [line.strip() for line in step["with"]["tags"].splitlines() if line.strip()]
+    assert pushed, "no image build found"
+    repositories = {tag.rsplit(":", 1)[0].rsplit("/", 1)[-1] for tag in pushed}
+    assert repositories == {"pseudolife-pg", "pseudolife-daemon-rust"}
 
 
 def test_release_ready_dependency_guard_rejects_early_publication():

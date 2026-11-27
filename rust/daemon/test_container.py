@@ -119,8 +119,10 @@ class ContainerTests(unittest.TestCase):
                 "    image: ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.0", contents["ops/docker-compose.yml"])),
             ("ops/Dockerfile.daemon", contents["ops/Dockerfile.daemon"].replace(
                 'CMD ["python", "-m", "pseudolife_memory.cli", "serve"]', 'CMD ["pseudolife-daemon"]')),
+            # The Rust Dockerfile in a job other than rust-image (the images
+            # job, which builds only the pg image since 0.26.0).
             (".github/workflows/release.yml", contents[".github/workflows/release.yml"].replace(
-                "file: ops/Dockerfile.daemon\n", "file: ops/Dockerfile.daemon-rust\n")),
+                "file: ops/Dockerfile.pg\n", "file: ops/Dockerfile.daemon-rust\n")),
         ):
             with self.subTest(path=path), self.assertRaises(AssertionError):
                 require_python_defaults(dict(contents, **{path: replacement}), verified_graph())

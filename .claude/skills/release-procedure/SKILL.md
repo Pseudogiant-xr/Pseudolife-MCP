@@ -184,15 +184,15 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=pseudolife"`.
 5. **GHCR images — automated.** The `images` job in `release.yml` (also
    downstream of the human-approved `publish` gate) builds and pushes
-   `ghcr.io/pseudogiant-xr/pseudolife-daemon:{<version>,latest}` and
    `ghcr.io/pseudogiant-xr/pseudolife-pg:{18,18-<version>}` with the
-   repo-scoped `GITHUB_TOKEN` — no stored secret. The compose overlay
-   `ops/docker-compose.ghcr.yml` is the consumer (pull-not-build installs);
-   the base compose file and `ops/update.ps1`'s local-build deploy flow are
-   untouched. One-time after the FIRST release that runs the job: flip both
-   packages to public in their GHCR package settings, or pulls fail with
+   repo-scoped `GITHUB_TOKEN` — no stored secret. Since 0.26.0 no release
+   publishes the retired Python daemon image
+   `ghcr.io/pseudogiant-xr/pseudolife-daemon` (its earlier tags stay, and
+   legacy bank imports run the archived 0.23.1 image by digest), so do not
+   look for it. One-time after the FIRST release that runs the job: flip the
+   package to public in its GHCR package settings, or pulls fail with
    "denied". Verify:
-   `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>`.
+   `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-pg:18-<version>`.
 
    **Rust artifacts.** One repository variable, disabled when unset, gates
    the Rust image, and its publication remains downstream of the human-approved

@@ -192,7 +192,8 @@ def publish_ready(value: str, tag: str, repo: str, commit: str, images: dict[str
         raise ValueError("release tag differs from native package version")
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("expected the full release commit SHA")
-    required = {"pseudolife-daemon", "pseudolife-pg", "pseudolife-daemon-rust"}
+    # No Python daemon image since 0.26.0: the Python daemon is retired.
+    required = {"pseudolife-pg", "pseudolife-daemon-rust"}
     if images.keys() != required or any(
         not re.fullmatch(r"sha256:[0-9a-f]{64}", digest) for digest in images.values()
     ):
@@ -224,7 +225,6 @@ def main() -> None:
         publish_assets(value, args.out, os.environ["GITHUB_REF_NAME"], os.environ["GITHUB_REPOSITORY"])
     elif args.command == "publish-ready":
         images = {
-            "pseudolife-daemon": os.environ["DAEMON_IMAGE_DIGEST"],
             "pseudolife-pg": os.environ["PG_IMAGE_DIGEST"],
             "pseudolife-daemon-rust": os.environ.get("RUST_IMAGE_DIGEST", ""),
         }
