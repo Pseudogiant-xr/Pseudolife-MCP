@@ -183,19 +183,20 @@ fn append_macos_process_images(rows: &mut Vec<Process>, bytes: &[u8]) -> Result<
             .next()
             .and_then(|s| s.parse::<u32>().ok())
             .ok_or("invalid parent process identity")?;
-        let image = rest
-            .next()
-            .ok_or("process image is unreadable; no runtime was removed")?
-            .trim_start();
-        // ps reports login shells by their conventional argv[0], such as
-        // "-zsh", rather than an absolute image path. Recognize exact standard
-        // shell markers; arbitrary relative or truncated paths remain unknown.
-        if !image.starts_with('/')
-            && !["-sh", "-bash", "-zsh", "-ksh", "-csh", "-tcsh", "-fish"].contains(&image)
-        {
-            return Err("process image is unknown; no runtime was removed".into());
-        }
-        rows.push((pid, ppid, PathBuf::from(image)));
+        let image = rest.next().unwrap_or_default().trim_start();
+        // `comm` is an absolute image path only for some processes: ps prints
+        // a bare name for a process started through PATH (`awk`, `node`), a
+        // login shell's "-zsh", a system daemon or driver and a zombie's
+        // "<defunct>" (hosted macos-15, 27 November 2026). As on Windows and
+        // Linux, such a row keeps its pid for tunnel liveness and the
+        // exclusive usage lock decides, since every process running a native
+        // runtime holds that lock shared for its whole life.
+        let image = if image.starts_with('/') {
+            PathBuf::from(image)
+        } else {
+            PathBuf::new()
+        };
+        rows.push((pid, ppid, image));
     }
     Ok(())
 }
