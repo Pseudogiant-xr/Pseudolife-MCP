@@ -14,7 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 EXTRACTOR = ROOT / "ops" / "Dockerfile.extractor"
 DAEMON_RUST = ROOT / "ops" / "Dockerfile.daemon-rust"
 
-DIGEST_FROM = re.compile(r"^FROM [^\s@:]+(?:/[^\s@:]+)*:[^\s@]+@sha256:[0-9a-f]{64}(?: AS \S+)?$")
+# Each quantified class excludes the character that ends it (`:`, then `@`), so a
+# match never backtracks; `/` path segments fall inside the first class.
+DIGEST_FROM = re.compile(r"^FROM [^\s@:]+:[^\s@]+@sha256:[0-9a-f]{64}(?: AS \S+)?$")
 HF_REVISION_URL = re.compile(r"^https://huggingface\.co/[^/]+/[^/]+/resolve/[0-9a-f]{40}/[^/]+\.gguf$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
