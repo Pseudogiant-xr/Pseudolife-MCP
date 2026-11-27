@@ -303,6 +303,21 @@ docker compose --env-file .env -f docker-compose.stack.yml up -d --wait --wait-t
 curl --fail http://127.0.0.1:8765/health
 ```
 
+If the daemon's log shows `could not download` for its models (the stack's
+network has no internet access, or a proxy only the host knows), install
+them once into the models volume from the default network, then start the
+daemon again:
+
+```bash
+docker volume create --label com.docker.compose.project=pseudolife-mcp \
+  --label com.docker.compose.volume=pseudolife_rust_models pseudolife-mcp_pseudolife_rust_models
+docker run --rm -e PSEUDOLIFE_DAEMON_MODELS_DIR=/models \
+  -v pseudolife-mcp_pseudolife_rust_models:/models \
+  --entrypoint pseudolife-daemon \
+  "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:${VERSION#v}" provision models --if-missing
+docker restart pseudolife-mcp-daemon
+```
+
 Ports remain loopback-only: Postgres on 5433 and the daemon on 8765. For
 clients on another machine, follow the [remote-bank guide](remote-bank.md)
 to expose the daemon with authentication; keep Postgres private.
