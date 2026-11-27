@@ -148,6 +148,12 @@ def test_sh_wrapper_without_systemd_names_the_native_shim(tmp_path, family):
     assert "python" not in proc.stderr.lower()
 
 
+def _recorded(launcher: Path) -> str:
+    """The stub's recorded call as one space-separated line (the bash stub
+    writes one argument per line, the Windows one a single line)."""
+    return " ".join((launcher.parent / "launcher-args").read_text(encoding="utf-8").split())
+
+
 def _run_ps1(tmp_path, family, *args, launcher_env=None):
     root = _checkout(tmp_path, FAMILIES[family] + ".ps1")
     env = dict(os.environ)
@@ -167,7 +173,7 @@ def test_ps1_wrapper_registers_through_the_native_client_it_finds(tmp_path, fami
     launcher = _stub(tmp_path / "elsewhere" / "pseudolife-mcp")
     root, proc = _run_ps1(tmp_path, family, launcher_env=str(launcher))
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    recorded = (launcher.parent / "launcher-args").read_text(encoding="utf-8")
+    recorded = _recorded(launcher)
     assert f"extractor-shim install-autostart {family}" in recorded, recorded
     assert str(launcher) in recorded and str(root) in recorded
 
@@ -179,8 +185,7 @@ def test_ps1_wrapper_finds_the_launcher_where_the_installer_puts_it(tmp_path, fa
     launcher = _stub(tmp_path / "local" / "pseudolife-mcp" / "bin" / "pseudolife-mcp.exe")
     _, proc = _run_ps1(tmp_path, family)
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert f"extractor-shim install-autostart {family}" in (launcher.parent / "launcher-args").read_text(
-        encoding="utf-8")
+    assert f"extractor-shim install-autostart {family}" in _recorded(launcher)
 
 
 @pytest.mark.skipif(PWSH is None, reason="pwsh not available")
