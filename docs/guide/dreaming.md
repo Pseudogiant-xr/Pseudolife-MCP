@@ -423,8 +423,12 @@ installer does all of this in one go —
 sidecar entirely; `ops\install.ps1 -Extractor ...` on Windows). The manual
 steps:
 
-1. Register the CLI shim (`evals/claude_shim.py`) to start automatically —
-   requires a logged-in `claude` CLI:
+1. Register the CLI shim to start automatically — requires a logged-in
+   `claude` CLI. Both scripts below use the installed native client (what
+   the installers set up, no Python needed) and run its
+   `pseudolife-mcp extractor-shim install-autostart claude`, as the
+   installers do; `--python` / `-PythonExe` picks the older Python runner
+   (`evals/claude_shim.py`) instead:
    - Windows: `ops\install-shim-autostart.ps1` (Task Scheduler, at your
      logon, `127.0.0.1:8082`; run it from a normal PowerShell 7 window, no
      elevation: the task is registered for your user only, with a limited
@@ -458,7 +462,11 @@ steps:
      `--model` choice; binds the docker bridge IP so the daemon container
      can reach it — `host-gateway` routes container→host traffic to the
      bridge, where a loopback bind is invisible).
-   - Both register `python ops/shim_autostart.py run claude` and nothing
+   - With the native client, the task or unit runs `pseudolife-mcp
+     extractor-shim claude --env-file <checkout>/ops/.env`, which reads its
+     settings from `ops/.env` at every start; rerun the script with new flags
+     to change them. With the Python runner, both register
+     `python ops/shim_autostart.py run claude` and nothing
      else: the model, prompt file, port, host, CLI path, interpreter and
      log file are read from `ops/.env` (`PSEUDOLIFE_CLAUDE_SHIM_MODEL`,
      `…_PROMPT_FILE`, `…_PORT`, `…_HOST`, `…_CLI`, `…_PYTHON`, `…_LOG`, in
@@ -571,7 +579,7 @@ stale-ok window only costs one failed primary attempt before the dream
 falls back. To run it by hand instead:
 
 ```bash
-python evals/codex_shim.py    # --model gpt-5.6-sol / gpt-5.6-luna / gpt-6-sol / gpt-6-luna / gpt-6.1-sol to change the default
+pseudolife-mcp extractor-shim codex --repo .    # --model gpt-5.6-sol / gpt-5.6-luna / gpt-6-sol / gpt-6-luna / gpt-6.1-sol to change the default
 ```
 
 then point the env triple at it exactly as in step 2 above, with

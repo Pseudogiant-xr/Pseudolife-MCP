@@ -22,7 +22,7 @@
 #                                    # Postgres login (made when it is
 #                                    # missing and the bundled Postgres
 #                                    # runs here: a contributor's host)
-#   ops\update.ps1 -ClientsOnly      # not here: python ops/update_clients.py
+#   ops\update.ps1 -ClientsOnly      # not here: pseudolife-mcp update --clients-only
 #
 # The deploy itself is pseudolife_memory/update_cli.py — the same code
 # `pseudolife-mcp update` runs from an installed package with no checkout.
@@ -55,7 +55,7 @@ $repo = Split-Path -Parent $PSScriptRoot
 
 # A release-mode option of `pseudolife-mcp update`; this script deploys the checkout.
 if ($ClientsOnly) {
-    [Console]::Error.WriteLine("-ClientsOnly is a release-mode option; a checkout deploy builds what the tree holds (for the clients alone: python ops/update_clients.py)")
+    [Console]::Error.WriteLine("-ClientsOnly is a release-mode option; a checkout deploy builds what the tree holds (for the clients alone: pseudolife-mcp update --clients-only)")
     exit 2
 }
 
