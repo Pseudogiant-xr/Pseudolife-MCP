@@ -166,15 +166,18 @@ fn platform_defaults() -> (Option<String>, Option<PathBuf>) {
 /// PostgreSQL user. Read from the wide call, not `GetUserNameA` as libpq
 /// does: an ANSI name is in the system code page, never UTF-8, so a
 /// non-ASCII account name decoded to nothing (or to `?` outside the code
-/// page), and `tokio-postgres` sends the user as UTF-8.
+/// page). `tokio-postgres` sends the user, and the default database named
+/// after it, as UTF-8, as it does a user or database the DSN names, so a
+/// password-file line matches this user as UTF-8 text.
 #[cfg(windows)]
 fn user_from_wide(buffer: &[u16]) -> Option<String> {
     String::from_utf16(until_nul(buffer)?).ok()
 }
 
-/// The folder in `buffer` (NUL-terminated UTF-16), whatever the system code
-/// page can spell, so a profile folder named for a non-ASCII account keeps
-/// its real name.
+/// The folder in `buffer` (NUL-terminated UTF-16), whether or not the system
+/// code page can spell it. libpq asks `SHGetFolderPathA`, which turns a
+/// character outside that code page into `?`, so a profile folder named for
+/// such an account would name a folder that does not exist.
 #[cfg(windows)]
 fn path_from_wide(buffer: &[u16]) -> Option<PathBuf> {
     use std::{ffi::OsString, os::windows::ffi::OsStringExt};
@@ -465,8 +468,8 @@ mod tests {
     #[test]
     fn a_non_ascii_profile_folder_keeps_its_name() {
         for folder in [
-            r"C:\Users\José\AppData\Roaming",
-            r"C:\Users\李雷\AppData\Roaming",
+            r"D:\Profiles\José\AppData\Roaming",
+            r"D:\Profiles\李雷\AppData\Roaming",
         ] {
             assert_eq!(
                 path_from_wide(&wide(folder)),
@@ -481,17 +484,21 @@ mod tests {
     }
 
     /// The live lookup on this host still answers: the account name Windows
-    /// reports, which `USERNAME` also names for an interactive or SSH logon.
+    /// reports, which `USERNAME` also names for an interactive or SSH logon
+    /// (a service account's `USERNAME` is the machine account, `<name>$`).
     #[cfg(windows)]
     #[test]
     fn the_live_windows_default_user_is_this_account() {
         let (user, home) = platform_defaults();
         let user = user.expect("this account has a name");
         assert!(!user.is_empty());
-        if let Ok(expected) = std::env::var("USERNAME") {
+        if let Ok(expected) = std::env::var("USERNAME")
+            && !expected.ends_with('$')
+        {
             assert!(user.eq_ignore_ascii_case(&expected), "{user} vs {expected}");
         }
-        assert!(home.expect("this account has a Roaming folder").is_absolute());
+        let home = home.expect("this account has a Roaming folder");
+        assert!(home.is_absolute(), "{}", home.display());
     }
 
     #[test]
