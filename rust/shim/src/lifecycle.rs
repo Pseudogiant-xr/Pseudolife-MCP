@@ -226,8 +226,28 @@ pub fn spawn_lock_path(url: &str, temporary: &Path) -> PathBuf {
 /// POSIX only: Windows' temporary directory is per-user already.
 #[cfg(unix)]
 pub fn private_spawn_lock_dir(home: &Path) -> Option<PathBuf> {
-    let dir = home.join(".pseudolife-mcp").join("spawn-locks");
+    let dir = spawn_lock_dir(home);
     crate::board::state::private_dir(&dir).ok().map(|()| dir)
+}
+/// The path [`private_spawn_lock_dir`] makes, without making it: a shim
+/// whose daemon answers never needs the folder, so it is made only when a
+/// spawn takes its lock.
+#[cfg(unix)]
+pub fn spawn_lock_dir(home: &Path) -> PathBuf {
+    home.join(".pseudolife-mcp").join("spawn-locks")
+}
+/// Makes `home`'s private spawn-lock folder; false when it cannot be made
+/// owner-only. Only POSIX names a private folder (see [`private_spawn_lock_dir`]).
+fn private_lock_folder_made(home: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        private_spawn_lock_dir(home).is_some()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = home;
+        true
+    }
 }
 struct SpawnLock {
     file: File,
@@ -312,6 +332,11 @@ pub struct EnsureOptions {
     /// `lock_path` itself is the shared temporary-directory lock (no private
     /// folder could be made), so it is vetted as the legacy lock is.
     pub lock_is_shared: bool,
+    /// The home whose private spawn-lock folder holds `lock_path`. The folder
+    /// is made owner-only just before the lock opens, so a daemon that answers
+    /// leaves the home as it was; if it cannot be made private, the vetted
+    /// legacy lock is used alone.
+    pub private_lock_home: Option<PathBuf>,
     pub external_wait: Duration,
     pub spawn_floor: Duration,
     pub spawn_ceiling: Duration,
@@ -324,6 +349,7 @@ impl EnsureOptions {
             lock_path: spawn_lock_path(url, temporary),
             legacy_lock_path: None,
             lock_is_shared: false,
+            private_lock_home: None,
             external_wait: EXTERNAL_WAIT,
             spawn_floor: SPAWN_WAIT,
             spawn_ceiling: SPAWN_WAIT_ALIVE,
@@ -554,7 +580,13 @@ pub async fn ensure_daemon<C: DaemonControl>(
         control.note(&format!("[shim] no answer from the memory daemon at {url}.\n  ({reason}, so no fallback daemon was spawned.)\n{LOCAL_REMEDY}\n{STARTING_WITHOUT_DAEMON}"));
         return Ok(None);
     }
-    let mut lock = if options.lock_is_shared {
+    let private_ready = options
+        .private_lock_home
+        .as_deref()
+        .is_none_or(private_lock_folder_made);
+    let mut lock = if !private_ready {
+        None
+    } else if options.lock_is_shared {
         SpawnLock::open_owned(&options.lock_path)
     } else {
         SpawnLock::open(&options.lock_path)
@@ -939,10 +971,14 @@ impl Runtime {
         let temporary = std::env::temp_dir();
         // Only a POSIX temporary directory is shared between accounts; on
         // Windows %TEMP% is per-user, so the lock stays where it was.
+        // The private folder is only named here; `ensure_daemon` makes it
+        // when a spawn needs its lock.
         #[cfg(unix)]
-        let private = crate::credentials::expand_user(Path::new("~"))
-            .ok()
-            .and_then(|home| private_spawn_lock_dir(&home));
+        let home = crate::credentials::expand_user(Path::new("~")).ok();
+        #[cfg(not(unix))]
+        let home: Option<PathBuf> = None;
+        #[cfg(unix)]
+        let private = home.as_deref().map(spawn_lock_dir);
         #[cfg(not(unix))]
         let private: Option<PathBuf> = None;
         let mut options = EnsureOptions::new(
@@ -952,6 +988,7 @@ impl Runtime {
         );
         if private.is_some() {
             options.legacy_lock_path = Some(spawn_lock_path(&url, &temporary));
+            options.private_lock_home = home;
         } else {
             // POSIX without a private folder: the shared lock alone, vetted.
             options.lock_is_shared = cfg!(unix);

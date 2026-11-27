@@ -529,6 +529,48 @@ fn test_the_spawn_lock_folder_is_private_to_this_account() {
     assert_eq!(lifecycle::private_spawn_lock_dir(&home.0), Some(dir));
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn test_the_spawn_lock_folder_is_made_only_when_a_spawn_needs_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = DisposableHome::new();
+    let dir = lifecycle::spawn_lock_dir(&home.0);
+    let mut opts = lifecycle::EnsureOptions::new("http://127.0.0.1:18765", false, &dir);
+    opts.private_lock_home = Some(home.0.clone());
+    // The daemon answers: this shim never locks, so the home is left as it was.
+    let mut control = Control {
+        healthy_at_probe: Some(1),
+        health: json!({"status":"ok"}),
+        ..Default::default()
+    };
+    assert!(
+        lifecycle::ensure_daemon("http://127.0.0.1:18765", &mut control, &opts)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(control.spawn_count, 0);
+    assert!(!dir.exists(), "{}", dir.display());
+    // No daemon: the folder is made owner-only and its lock taken before the spawn.
+    let mut control = Control {
+        healthy_at_probe: Some(3),
+        health: json!({"status":"ok"}),
+        ..Default::default()
+    };
+    assert!(
+        lifecycle::ensure_daemon("http://127.0.0.1:18765", &mut control, &opts)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(control.spawn_count, 1);
+    assert_eq!(
+        fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    assert!(opts.lock_path.starts_with(&dir) && opts.lock_path.is_file());
+}
+
 #[test]
 fn test_spawn_daemon_never_allocates_a_console_window() {
     assert_eq!(lifecycle::WINDOWS_DETACHED_FLAGS, 0x08000000 | 0x00000200);

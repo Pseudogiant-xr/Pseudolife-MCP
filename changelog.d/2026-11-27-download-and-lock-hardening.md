@@ -4,7 +4,8 @@
   `http://` `PSEUDOLIFE_RELEASE_BASE_URL` or `PSEUDOLIFE_NATIVE_ARCHIVE_URL`
   (a loopback fixture or a trusted mirror) still fetches over HTTP.
 - On Linux and macOS the native client takes its daemon spawn lock in
-  `~/.pseudolife-mcp/spawn-locks`, a folder only its account can use, so
+  `~/.pseudolife-mcp/spawn-locks`, a folder only its account can use (made
+  only when the client starts a daemon, not when one already answers), so
   another account on the host can no longer hold the shared `/tmp` lock and
   stall the daemon start until it times out (Windows' `%TEMP%` is already
   per-user, so its lock is unchanged). The temporary-folder lock older clients
