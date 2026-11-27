@@ -17,17 +17,16 @@ release publishes: it checks free disk space, pulls that image and
 downloads the pinned models (about 2.4 GB, once, into their own
 `pseudolife_rust_models` volume, which stays out of every backup) before
 any container starts, and records the selection once the daemon reports ready at that
-release. With no `--engine`, the install takes the Python daemon instead,
-saying why, when it has no bearer token (`--no-token`, `--transport http`
-with no token set, or a Python-client install on a host that cannot
-install the shim and so mints none), when the release publishes no Rust image or its models cannot be
-downloaded, or when the bank already exists
-(the next attended `pseudolife-mcp update` moves that bank, after its own
-checks). `ops/install.sh --engine python` (Windows: `ops/install.ps1
--Engine python`) chooses Python and records that choice, so later updates
-keep it. `--engine rust` names Rust explicitly: without a bearer, image or
-models it refuses, names `--engine python`, and starts nothing; for a bank
-that already exists it installs on Python and then switches through update
+release. The Python daemon is retired, so no install takes it: without a
+bearer token (`--no-token`, `--transport http` with no token set, or a
+Python-client install on a host that cannot install the shim and so mints
+none), or when the release publishes no Rust image or its models cannot
+be downloaded, the install refuses with the cause and its fix and starts
+nothing, and `--engine python` (Windows: `-Engine python`) is refused. A
+bank that already exists, or a host still on the Python daemon, comes up
+as it is and is then moved to Rust by `pseudolife-mcp update`, which
+checks the bank first; `--engine rust` names the same engine explicitly
+and switches through update
 (below).
 
 A release-mode `pseudolife-mcp update` moves a Docker host that never

@@ -978,6 +978,10 @@ if (-not $ClientOnly -and "$ClientUpdateSchedule" -notin "", "ask", "no") {
 # question), so an implied client-only install refuses it too. ValidateSet
 # ignores case; the helper and update do not.
 $Engine = "$Engine".ToLowerInvariant()
+if ($Engine -eq 'python') {
+    [Console]::Error.WriteLine("-Engine python is retired: the Python daemon gets no more fixes, so this installer runs the Rust daemon and moves a host still on Python to it. Drop -Engine python. Nothing was changed.")
+    exit 2
+}
 if ($Engine -and $ClientOnly) {
     [Console]::Error.WriteLine("-Engine selects this host's Docker daemon, and a client-only install runs none; drop -Engine, or run the installer on the daemon's host. Nothing was changed.")
     exit 2
@@ -987,7 +991,7 @@ if ($Engine -and $ClientOnly) {
 $envHasToken = [bool]"$env:PSEUDOLIFE_MCP_TOKEN$env:PSEUDOLIFE_MCP_TOKENS" -or ((Test-Path $envFile) -and [bool](Select-String -LiteralPath $envFile -Pattern '^PSEUDOLIFE_MCP_TOKENS?=\S' -Quiet))
 $rustBearer = -not ($NoToken -or ($Transport -eq 'http' -and -not $envHasToken))
 if ($Engine -eq 'rust' -and -not $rustBearer) {
-    [Console]::Error.WriteLine("-Engine rust needs the daemon's bearer token: pseudolife-mcp update verifies the Rust daemon with an authenticated read, and this install would mint none (-NoToken, or -Transport http with no token in ops/.env). Drop that option or use -Engine python. Nothing was changed.")
+    [Console]::Error.WriteLine("-Engine rust needs the daemon's bearer token: pseudolife-mcp update verifies the Rust daemon with an authenticated read, and this install would mint none (-NoToken, or -Transport http with no token in ops/.env). Drop that option. Nothing was changed.")
     exit 2
 }
 # <<< engine flag <<<
@@ -1417,15 +1421,14 @@ function Test-ShimToolingReady($python) {
 }
 # <<< shim tooling <<<
 # >>> bearer refusal ways >>>
-# How the bearer refusals (stage 4b and stage 5b) end. An accepted Rust
-# install keeps its engine (-Engine python only schedules the switch), so a
-# Python rerun is offered only without one; where -Engine python scheduled
-# the switch, the refusal says what the switch needs: pseudolife-mcp update
-# makes it from the shim, and reads the Rust daemon with its bearer first.
+# How the bearer refusals (stage 4b and stage 5b) end. The Python daemon is
+# retired, so no refusal offers it; where a host still on Python moves to
+# Rust after the install, the refusal says what that move needs:
+# pseudolife-mcp update makes it from the shim and verifies the Rust daemon
+# with the token.
 function Get-BearerRefusalWays {
-    if ($installedEngine -ne 'rust') { return @{ Python = '; or rerun with -Engine python'; Switch = '' } }
-    if ($switchEngine -ne 'python') { return @{ Python = ''; Switch = '' } }
-    return @{ Python = ''; Switch = ' Switching to the Python daemon needs that token too, and the shim (pipx or a pip-capable Python >= 3.10), because pseudolife-mcp update makes the switch and reads the Rust daemon with the token first: with both in place, rerun with -Engine python and the install switches this host after it.' }
+    if ($switchEngine -ne 'rust') { return @{ Switch = '' } }
+    return @{ Switch = " This host's Python daemon moves to Rust after the install, and that move needs the token too, and the shim (pipx or a pip-capable Python >= 3.10)." }
 }
 # <<< bearer refusal ways <<<
 # >>> daemon engine >>>
@@ -1448,36 +1451,29 @@ function Invoke-EngineHelper {
 $installedEngine = ""
 $composeEngine = ""
 $switchEngine = ""
-$engineDefaulted = $false
 $engineFiles = @()
 if (-not $ClientOnly) {
     $installedEngine = "$(Invoke-EngineHelper detect --repo $repo)".Trim()
     if ($LASTEXITCODE -ne 0) { exit 1 }
     if ($installedEngine -eq 'none') {
-        # Rust is the default since G2; without a bearer the default stays Python.
-        if ($Engine) { $composeEngine = $Engine }
-        # An existing bank moves only through update's checks, which its own
-        # default does on the next attended update.
-        elseif ($bankExisted) {
-            $composeEngine = 'python'
-            Step "Daemon engine: python for this existing bank; the next attended pseudolife-mcp update moves it to Rust after its checks"
-        }
-        elseif (Test-RustTokenExpected) { $composeEngine = 'rust'; $engineDefaulted = $true }
-        else { $composeEngine = 'python'; Step "Daemon engine: python (no bearer token for the default Rust daemon)" }
         # An existing bank reaches Rust only through update, which checks its
         # schema and counters first.
-        if ($composeEngine -eq 'rust' -and $bankExisted) { $composeEngine = 'python'; $switchEngine = 'rust' }
+        if ($bankExisted) { $composeEngine = 'python'; $switchEngine = 'rust' }
+        else { $composeEngine = 'rust' }
     } elseif ($installedEngine -eq 'rust-unaccepted') {
-        # This checkout's own unfinished Rust install: redo it, or install Python.
-        $composeEngine = if ($Engine) { $Engine } else { 'rust' }
+        # This checkout's own unfinished Rust install: redo it.
+        $composeEngine = 'rust'
+    } elseif ($installedEngine -eq 'python') {
+        # A host still on the retired Python daemon moves after the install.
+        $composeEngine = 'python'; $switchEngine = 'rust'
     } else {
         $composeEngine = $installedEngine
-        if ($Engine -and ($installedEngine -replace '-checkout$', '') -ne $Engine) { $switchEngine = $Engine }
     }
     # Assigned, not `= if (...)`: an if-expression unrolls a one-item array to a string.
     $defaultArgs = @()
-    # Before anything is pulled: Rust with no bearer to come refuses here.
-    if ($composeEngine -eq 'rust' -and -not $engineDefaulted -and -not (Test-RustTokenExpected)) {
+    # Before anything is pulled: Rust now or after the install, with no
+    # bearer to come, refuses here.
+    if (($composeEngine -eq 'rust' -or $switchEngine -eq 'rust') -and -not (Test-RustTokenExpected)) {
         # Another release's unfinished Rust container is refused by prepare
         # whatever the token, so its refusal comes first: no fix below passes it.
         if ($installedEngine -eq 'rust-unaccepted') {
@@ -1486,18 +1482,22 @@ if (-not $ClientOnly) {
         }
         $ways = Get-BearerRefusalWays
         if (-not $rustBearer) {
-            [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install cannot mint one (-NoToken, or -Transport http with no token, given now or recorded in ops/.env by an earlier run): rerun with -NoToken:`$false -Transport shim, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and rerun with -NoToken:`$false$($ways.Python).$($ways.Switch) Nothing was pulled or started.")
+            [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install cannot mint one (-NoToken, or -Transport http with no token, given now or recorded in ops/.env by an earlier run): rerun with -NoToken:`$false -Transport shim, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and rerun with -NoToken:`$false.$($ways.Switch) Nothing was pulled or started.")
         } else {
-            [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install cannot mint one (no pipx or pip-capable Python >= 3.10 to install the shim): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx, then rerun$($ways.Python).$($ways.Switch) Nothing was pulled or started.")
+            [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install cannot mint one (no pipx or pip-capable Python >= 3.10 to install the shim): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx, then rerun.$($ways.Switch) Nothing was pulled or started.")
         }
         exit 2
     }
-    if ($engineDefaulted) { $defaultArgs = @('--default') }
+    # An unavailable Rust image or models refuse here with the helper's own
+    # cause and fix; nothing falls back to Python.
     $engineFiles = @(Invoke-EngineHelper prepare --repo $repo --engine $composeEngine @defaultArgs | Where-Object { $_ })
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    # A defaulted Rust install whose image or models are unavailable falls back
-    # to Python (the helper said why); an explicit -Engine rust refused above.
-    if ($composeEngine -eq 'rust' -and $engineFiles.Count -eq 0) { $composeEngine = 'python' }
+    # A Rust engine always comes with its overlay; without one the base file
+    # would start the retired Python image, so the install stops instead.
+    if ($composeEngine -eq 'rust' -and $engineFiles.Count -eq 0) {
+        [Console]::Error.WriteLine("The native client's engine step prepared no Rust daemon overlay, so this install would start the retired Python daemon; rerun the installer (it refreshes the native client). Nothing was started.")
+        exit 1
+    }
     if ($switchEngine) { Step "Daemon engine: $($composeEngine -replace '-checkout$', '') for now; switching to $switchEngine after the install" }
     elseif ($installedEngine -in 'none', 'rust-unaccepted') { Step "Daemon engine: $($composeEngine -replace '-checkout$', '')" }
     else { Step "Daemon engine unchanged: $($composeEngine -replace '-checkout$', '')" }
@@ -1656,17 +1656,11 @@ if ($ClientOnly) {
 # The default Rust daemon is verified with an authenticated read, so it
 # follows the bearer this stage actually produced, not the one stage 4b
 # predicted (a host that cannot install the shim mints none).
-if ($composeEngine -eq 'rust' -and $tokenState -notin 'minted', 'present') {
-    if ($engineDefaulted) {
-        $composeEngine = 'python'
-        $engineFiles = @()
-        Step "Daemon engine: python after all (no bearer token for the default Rust daemon: $tokenState)"
-    } else {
-        # As at stage 4b (the bearer refusal ways).
-        $ways = Get-BearerRefusalWays
-        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun$($ways.Python).$($ways.Switch) The daemon was not started; the Rust image and models stay downloaded for the rerun.")
-        exit 2
-    }
+if (($composeEngine -eq 'rust' -or $switchEngine -eq 'rust') -and $tokenState -notin 'minted', 'present') {
+    # As at stage 4b (the bearer refusal ways).
+    $ways = Get-BearerRefusalWays
+    [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun.$($ways.Switch) The daemon was not started; the Rust image and models stay downloaded for the rerun.")
+    exit 2
 }
 # <<< engine token <<<
 
@@ -3529,10 +3523,6 @@ if (-not $ClientOnly) {
         $engineStatus = "$(Invoke-EngineHelper accept)".Trim()
         if ($LASTEXITCODE -ne 0) { exit 1 }
         if ($engineStatus -eq 'accepted') { Step "Rust daemon selection recorded; pseudolife-mcp update keeps it" }
-    } elseif ($Engine -eq 'python') {
-        # Kept by later updates too: the G2 default never moves a chosen host.
-        Invoke-EngineHelper choose --engine python | Out-Null
-        if ($LASTEXITCODE -ne 0) { exit 1 }
     }
     # <<< engine record <<<
     Invoke-EndpointContainerProbe
