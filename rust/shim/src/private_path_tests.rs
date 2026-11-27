@@ -526,6 +526,173 @@ mod posix {
         assert_eq!(hook_command(vec![]), 2);
         mode(&shared, 0o700);
     }
+
+    /// A `~/.config` left group-writable by umask 002, holding the user's own
+    /// link, and the account files that say whose group that is.
+    fn group_writable_config(scratch: &Scratch) -> (PathBuf, u32, u32) {
+        use std::os::unix::fs::MetadataExt;
+        let real = scratch.0.join("dotfiles-claude");
+        dir(&real);
+        let config = scratch.0.join("config");
+        dir(&config);
+        symlink(&real, config.join("Claude")).unwrap();
+        mode(&config, 0o775);
+        let gid = fs::metadata(&config).unwrap().gid();
+        let uid = rustix::process::geteuid().as_raw();
+        (config.join("Claude/claude_desktop_config.json"), uid, gid)
+    }
+
+    fn accounts(
+        uid: u32,
+        primary: u32,
+        gid: u32,
+        group: &str,
+        members: &str,
+        extra: &str,
+    ) -> Accounts {
+        Accounts::from_text(
+            &format!("root:x:0:0::/root:/bin/sh\nme:x:{uid}:{primary}::/home/me:/bin/sh\n{extra}"),
+            &format!("root:x:0:\n{group}:x:{gid}:{members}\n"),
+        )
+    }
+
+    #[test]
+    fn a_users_private_group_folder_is_trusted_for_a_client_config() {
+        let scratch = Scratch::new("private-group");
+        let (file, uid, gid) = group_writable_config(&scratch);
+        // The plain rule is unchanged: the token file would still refuse it.
+        assert!(check_ancestors(&file).is_err());
+        // The user's own private group: the umask-002 case passes.
+        for members in ["", "me"] {
+            assert_eq!(
+                check_ancestors_with(&file, accounts(uid, gid, gid, "me", members, "")),
+                Ok(()),
+                "members {members:?}"
+            );
+        }
+        mode(&scratch.0.join("config"), 0o700);
+    }
+
+    #[test]
+    fn a_shared_or_foreign_group_folder_is_still_refused_for_a_client_config() {
+        let scratch = Scratch::new("shared-group");
+        let (file, uid, gid) = group_writable_config(&scratch);
+        for (why, accounts) in [
+            (
+                "another member",
+                accounts(uid, gid, gid, "me", "me,other", ""),
+            ),
+            (
+                "not the user's primary group",
+                accounts(uid, gid + 1, gid, "me", "", ""),
+            ),
+            (
+                "named for someone else",
+                accounts(uid, gid, gid, "staff", "", ""),
+            ),
+            (
+                "another account's primary group too",
+                accounts(
+                    uid,
+                    gid,
+                    gid,
+                    "me",
+                    "",
+                    &format!("other:x:{}:{gid}::/home/o:/bin/sh\n", uid + 1),
+                ),
+            ),
+            ("not listed at all", Accounts::from_text("", "")),
+            (
+                "accounts also from LDAP (nsswitch)",
+                Accounts::from_files(
+                    &format!("me:x:{uid}:{gid}::/home/me:/bin/sh\n"),
+                    &format!("me:x:{gid}:\n"),
+                    "passwd: files sss\ngroup: files [SUCCESS=merge] sss\n",
+                ),
+            ),
+            (
+                "a compat-mode NIS reference in the group file",
+                Accounts::from_text(
+                    &format!("me:x:{uid}:{gid}::/home/me:/bin/sh\n"),
+                    &format!("me:x:{gid}:\n+:::\n"),
+                ),
+            ),
+            (
+                "a group password anyone who knows it can use with newgrp",
+                Accounts::from_text(
+                    &format!("me:x:{uid}:{gid}::/home/me:/bin/sh\n"),
+                    &format!("me:$6$salt$hash:{gid}:\n"),
+                ),
+            ),
+            (
+                "a second entry for the same gid",
+                Accounts::from_text(
+                    &format!("me:x:{uid}:{gid}::/home/me:/bin/sh\n"),
+                    &format!("me:x:{gid}:\nshared:x:{gid}:other\n"),
+                ),
+            ),
+        ] {
+            let refusal = check_ancestors_with(&file, accounts).unwrap_err();
+            assert_eq!(refusal.element, scratch.0.join("config/Claude"), "{why}");
+        }
+        // Writable by others as well is never relaxed.
+        mode(&scratch.0.join("config"), 0o777);
+        assert!(check_ancestors_with(&file, accounts(uid, gid, gid, "me", "", "")).is_err());
+        mode(&scratch.0.join("config"), 0o700);
+    }
+
+    #[test]
+    fn only_local_account_sources_count_as_files_only() {
+        for (text, files_only) in [
+            ("", true),
+            ("passwd: files\ngroup: files\n", true),
+            (
+                "passwd: files systemd\ngroup: files systemd\nhosts: files dns\n",
+                true,
+            ),
+            ("passwd: compat\ngroup: compat\nshadow: compat\n", false),
+            ("# group: ldap\npasswd: files\n", true),
+            ("passwd: files sss\ngroup: files sss\n", false),
+            ("passwd: files\ngroup: files [SUCCESS=merge] ldap\n", false),
+            ("group: files [NOTFOUND=return] winbind\n", false),
+            (
+                "passwd: files\ngroup: files\ninitgroups: files sss\n",
+                false,
+            ),
+            ("passwd: files\ngroup:\tfiles nis\n", false),
+            ("group: files [NOTFOUND=return]sss\n", false),
+            ("group: files [NOTFOUND=return\n", false),
+            ("group: files [ NOTFOUND=return ] systemd\n", true),
+        ] {
+            assert_eq!(nss_files_only(text), files_only, "{text:?}");
+        }
+    }
+
+    /// With a POSIX ACL the mode's group bits are only its mask, so a named
+    /// entry could let another account write: the exemption does not apply.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_private_group_folder_with_an_access_acl_is_still_refused() {
+        let scratch = Scratch::new("private-group-acl");
+        let (file, uid, gid) = group_writable_config(&scratch);
+        let config = scratch.0.join("config");
+        let mine = accounts(uid, gid, gid, "me", "", "");
+        assert_eq!(check_ancestors_with(&file, mine.clone()), Ok(()));
+        let added = std::process::Command::new("setfacl")
+            .args(["-m", "u:nobody:rwx"])
+            .arg(&config)
+            .status();
+        if !added.is_ok_and(|status| status.success()) {
+            mode(&config, 0o700);
+            if std::env::var_os("CI").is_some() {
+                panic!("setfacl is needed for this test");
+            }
+            eprintln!("ACL case unverified locally: setfacl unavailable or unsupported here");
+            return;
+        }
+        assert!(check_ancestors_with(&file, mine).is_err());
+        mode(&config, 0o700);
+    }
 }
 
 // ---- Windows, on the real filesystem (the Windows dev VM, hosted CI) ----

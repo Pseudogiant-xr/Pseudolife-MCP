@@ -22,7 +22,7 @@ pub(super) fn write_config_with(
     // not checked: whoever can replace it can already rewrite the config.)
     let mut hop = path.to_owned();
     for _ in 0..=crate::private_path::MAX_LINKS {
-        crate::credentials::reject_ancestor_redirects(&hop)
+        crate::credentials::reject_client_config_redirects(&hop)
             .map_err(|_| "client config target is redirected")?;
         let Ok(next) = fs::read_link(&hop) else {
             break;
@@ -37,7 +37,7 @@ pub(super) fn write_config_with(
     } else {
         path.to_owned()
     };
-    crate::credentials::reject_ancestor_redirects(&target)
+    crate::credentials::reject_client_config_redirects(&target)
         .map_err(|_| "client config target is redirected")?;
     let parent = target.parent().ok_or("client config has no parent")?;
     if !parent.is_dir() {

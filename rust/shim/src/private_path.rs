@@ -263,6 +263,227 @@ pub fn check_path(path: &Path) -> Result<(), Refusal> {
     Walk::default().walk(path)
 }
 
+/// [`check_ancestors`] for a client's own config file (the maintainer's
+/// ruling on #2032): on Unix a link in a folder only its group may also
+/// write is trusted when that group is the user's own private group (as
+/// umask 002 leaves `~/.config` on user-private-group systems), because no
+/// other account is in it.
+pub fn check_client_config_ancestors(path: &Path) -> Result<(), Refusal> {
+    #[cfg(unix)]
+    {
+        check_ancestors_with(path, Accounts::system())
+    }
+    #[cfg(not(unix))]
+    {
+        check_ancestors(path)
+    }
+}
+
+#[cfg(unix)]
+pub(crate) fn check_ancestors_with(path: &Path, accounts: Accounts) -> Result<(), Refusal> {
+    match path.parent() {
+        Some(parent) => Walk {
+            accounts: Some(accounts),
+            ..Walk::default()
+        }
+        .walk(parent),
+        None => Ok(()),
+    }
+}
+
+/// The local account files, read to tell a user's private group from a
+/// shared one. An account they do not list (one from LDAP, say) is never
+/// taken for a private group, and nor is any group while the system also
+/// takes accounts or groups from a source those files do not show
+/// (`nsswitch.conf`), so its folders keep the plain rule. `/etc/gshadow`
+/// is readable only by root and is not consulted.
+#[cfg(unix)]
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Accounts {
+    passwd: String,
+    group: String,
+    /// `nsswitch.conf` takes `passwd` and `group` only from these files.
+    files_only: bool,
+}
+
+/// Whether `nsswitch.conf` takes `passwd`, `group` and `initgroups` only from the local
+/// files: `files`, or `systemd` (which adds only its own dynamic users and
+/// groups). `compat` is not, since its `+`/`-` lines pull in NIS. No such
+/// line means `files`.
+#[cfg(unix)]
+pub(crate) fn nss_files_only(nsswitch: &str) -> bool {
+    nsswitch.lines().all(|line| {
+        let line = line.split('#').next().unwrap_or("");
+        let Some((database, sources)) = line.split_once(':') else {
+            return true;
+        };
+        // `initgroups` can add supplementary groups on its own.
+        if !matches!(database.trim(), "passwd" | "group" | "initgroups") {
+            return true;
+        }
+        // A `[...]` action group is skipped only when its brackets stand
+        // alone; a service name glued to one (`[...]sss`) fails.
+        let mut in_action = false;
+        sources.split_whitespace().all(|word| {
+            if in_action || word.starts_with('[') {
+                match word.find(']') {
+                    Some(end) if end + 1 == word.len() => in_action = false,
+                    Some(_) => return false,
+                    None => in_action = true,
+                }
+                return true;
+            }
+            matches!(word, "files" | "systemd")
+        }) && !in_action
+    })
+}
+
+#[cfg(unix)]
+impl Accounts {
+    pub(crate) fn system() -> Self {
+        let nsswitch = match std::fs::read_to_string("/etc/nsswitch.conf") {
+            Ok(text) => Some(text),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Some(String::new()),
+            Err(_) => None,
+        };
+        // systemd's userdb adds members through `*.membership` drop-ins, a
+        // source the group file does not show.
+        let userdb_membership = [
+            "/etc/userdb",
+            "/run/userdb",
+            "/run/host/userdb",
+            "/usr/lib/userdb",
+            "/usr/local/lib/userdb",
+        ]
+        .iter()
+        .any(|dir| match std::fs::read_dir(dir) {
+            Ok(entries) => entries
+                .flatten()
+                .any(|entry| entry.file_name().to_string_lossy().ends_with(".membership")),
+            Err(error) => error.kind() != io::ErrorKind::NotFound,
+        });
+        Self {
+            passwd: std::fs::read_to_string("/etc/passwd").unwrap_or_default(),
+            group: std::fs::read_to_string("/etc/group").unwrap_or_default(),
+            files_only: !userdb_membership && nsswitch.as_deref().is_some_and(nss_files_only),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_text(passwd: &str, group: &str) -> Self {
+        Self::from_files(
+            passwd,
+            group,
+            "passwd: files systemd\ngroup: files systemd\n",
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_files(passwd: &str, group: &str, nsswitch: &str) -> Self {
+        Self {
+            passwd: passwd.to_owned(),
+            group: group.to_owned(),
+            files_only: nss_files_only(nsswitch),
+        }
+    }
+
+    /// `gid` is `uid`'s private group: its primary group, named as the
+    /// user is, with no other member, and no other account's primary group.
+    pub(crate) fn private_group(&self, uid: u32, gid: u32) -> bool {
+        // A `+`/`-` line is a compat-mode reference to another source.
+        let external = |text: &str| {
+            text.lines()
+                .any(|line| line.starts_with('+') || line.starts_with('-'))
+        };
+        if !self.files_only || external(&self.passwd) || external(&self.group) {
+            return false;
+        }
+        let users: Vec<(&str, u32, u32)> = self
+            .passwd
+            .lines()
+            .filter_map(|line| {
+                let mut fields = line.split(':');
+                let name = fields.next()?;
+                let id = fields.nth(1)?.parse().ok()?;
+                let primary = fields.next()?.parse().ok()?;
+                Some((name, id, primary))
+            })
+            .collect();
+        let Some(&(name, _, primary)) = users.iter().find(|(_, id, _)| *id == uid) else {
+            return false;
+        };
+        if primary != gid
+            || users
+                .iter()
+                .any(|(other, id, group)| *group == gid && (*id != uid || *other != name))
+        {
+            return false;
+        }
+        // Every entry for the gid, not only the first: a second one with
+        // another name or members makes it shared.
+        let entries: Vec<(&str, &str, &str)> = self
+            .group
+            .lines()
+            .filter_map(|line| {
+                let mut fields = line.split(':');
+                let group = fields.next()?;
+                let password = fields.next()?;
+                let id: u32 = fields.next()?.parse().ok()?;
+                let members = fields.next().unwrap_or("");
+                (id == gid).then_some((group, password, members))
+            })
+            .collect();
+        // A group password lets anyone who knows it join with newgrp: only
+        // a locked or shadowed field (`x`, `!`, `*`, empty) counts. What
+        // `/etc/gshadow` holds behind `x` (readable only by root) only root
+        // can set, and root is not another account this rule guards against.
+        !entries.is_empty()
+            && entries.iter().all(|(group, password, members)| {
+                matches!(*password, "x" | "!" | "*" | "")
+                    && *group == name
+                    && members
+                        .split(',')
+                        .map(str::trim)
+                        .all(|member| member.is_empty() || member == name)
+            })
+    }
+}
+
+/// No ACL on `path` that could let another account write: with a POSIX
+/// access ACL the mode's group bits are only its mask. Only a filesystem
+/// that supports POSIX ACLs and reports none passes (a filesystem that does
+/// not support them is unknown, so it fails); an NFSv4 ACL fails too.
+/// The folder is on a local filesystem whose gids are this host's own: a
+/// network or FUSE filesystem may map them differently, so it fails.
+#[cfg(target_os = "linux")]
+fn on_local_filesystem(path: &Path) -> bool {
+    // ext2/3/4, xfs, btrfs, tmpfs, f2fs, zfs, bcachefs, overlayfs.
+    const LOCAL: [i64; 8] = [
+        0xEF53,
+        0x5846_5342,
+        0x9123_683E,
+        0x0102_1994,
+        0xF2F5_2010,
+        0x2FC1_2FC1,
+        0xCA45_1A4E,
+        0x794C_7630,
+    ];
+    // `f_type`'s width differs between targets.
+    #[allow(clippy::unnecessary_cast)]
+    rustix::fs::statfs(path).is_ok_and(|fs| LOCAL.contains(&(fs.f_type as i64)))
+}
+
+#[cfg(target_os = "linux")]
+fn without_access_acl(path: &Path) -> bool {
+    use rustix::io::Errno;
+    // A zero-length read returns the attribute's size without its value.
+    let mut empty: [u8; 0] = [];
+    let posix = rustix::fs::getxattr(path, "system.posix_acl_access", &mut empty[..]);
+    let nfs4 = rustix::fs::getxattr(path, "system.nfs4_acl", &mut empty[..]);
+    matches!(posix, Ok(0) | Err(Errno::NODATA))
+        && matches!(nfs4, Ok(0) | Err(Errno::NODATA | Errno::NOTSUP))
+}
+
 /// How many distinct links [`check_ancestors`] follows for `path`: for the
 /// tests that each link costs one against [`MAX_LINKS`], however it is
 /// spelled when the walk meets it.
@@ -345,6 +566,9 @@ struct Walk {
     accepted: HashSet<LinkKey>,
     resolving: HashSet<LinkKey>,
     links: usize,
+    /// Set for a client config: a user's private group is no other account.
+    #[cfg(unix)]
+    accounts: Option<Accounts>,
 }
 
 type LinkKey = ((u64, u64), PathBuf);
@@ -373,7 +597,11 @@ impl Walk {
                 cause: Box::new(cause),
             })
         };
-        match inspect(prefix) {
+        #[cfg(unix)]
+        let inspected = inspect(prefix, self.accounts.as_ref());
+        #[cfg(not(unix))]
+        let inspected = inspect(prefix);
+        match inspected {
             Ok(Entry::Plain) => Ok(()),
             Ok(Entry::Link {
                 target,
@@ -433,7 +661,7 @@ enum Entry {
 }
 
 #[cfg(unix)]
-fn inspect(path: &Path) -> io::Result<Entry> {
+fn inspect(path: &Path, accounts: Option<&Accounts>) -> io::Result<Entry> {
     use std::os::unix::fs::MetadataExt;
     let meta = match std::fs::symlink_metadata(path) {
         Ok(meta) => meta,
@@ -453,26 +681,44 @@ fn inspect(path: &Path) -> io::Result<Entry> {
     let holder = std::fs::metadata(holder_path)?;
     let me = rustix::process::geteuid().as_raw();
     let shown = target.clone();
-    let distrust =
-        posix_link_cause(me, meta.uid(), holder.uid(), holder.mode()).map(
-            |distrust| match distrust {
-                PosixDistrust::LinkOwner(owner) => Cause::LinkOwner {
-                    owner: account_name(owner),
-                    target: shown,
-                },
-                PosixDistrust::HolderOwner(owner) => Cause::HolderOwner {
-                    holder: holder_path.to_path_buf(),
-                    owner: account_name(owner),
-                    target: shown,
-                },
-                PosixDistrust::HolderWritable(writer) => Cause::HolderWritable {
-                    holder: holder_path.to_path_buf(),
-                    writer,
-                    owned: holder.uid() == me,
-                    target: shown,
-                },
+    // Linux only: there the ACL can be read, and elsewhere (macOS) the
+    // primary group is the shared `staff` anyway.
+    let private_group = |gid: u32| {
+        cfg!(target_os = "linux")
+            && accounts.is_some_and(|accounts| accounts.private_group(me, gid))
+            && {
+                #[cfg(target_os = "linux")]
+                {
+                    on_local_filesystem(holder_path) && without_access_acl(holder_path)
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    false
+                }
+            }
+    };
+    let distrust = posix_link_cause(me, meta.uid(), holder.uid(), holder.mode())
+        .filter(|distrust| {
+            *distrust != PosixDistrust::HolderWritable(Writer::Group)
+                || !private_group(holder.gid())
+        })
+        .map(|distrust| match distrust {
+            PosixDistrust::LinkOwner(owner) => Cause::LinkOwner {
+                owner: account_name(owner),
+                target: shown,
             },
-        );
+            PosixDistrust::HolderOwner(owner) => Cause::HolderOwner {
+                holder: holder_path.to_path_buf(),
+                owner: account_name(owner),
+                target: shown,
+            },
+            PosixDistrust::HolderWritable(writer) => Cause::HolderWritable {
+                holder: holder_path.to_path_buf(),
+                writer,
+                owned: holder.uid() == me,
+                target: shown,
+            },
+        });
     Ok(Entry::Link {
         target,
         distrust,
