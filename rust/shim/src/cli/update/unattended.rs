@@ -35,6 +35,21 @@ pub(crate) fn log_step(text: &str) {
         }
     });
 }
+/// Appends `text` to the unattended log from outside `run_unattended` (the
+/// full hand-off runs before it opens the log); best effort.
+pub(crate) fn log_line(text: &str) {
+    let path = seams::data_dir().join(LOG_NAME);
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(mut file) = OpenOptions::new().append(true).create(true).open(&path) {
+        let _ = writeln!(
+            file,
+            "[{}] {text}",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+        );
+    }
+}
 struct LogGuard;
 impl Drop for LogGuard {
     fn drop(&mut self) {
@@ -471,7 +486,8 @@ fn run_inner(
             return Ok(4);
         }
     };
-    let _lock = match super::UpdateLock::acquire() {
+    // A full hand-off child borrows the lock of the updater that started it.
+    let _lock = match super::UpdateLock::acquire_borrowing(update.o.handoff.from.as_deref()) {
         Ok(lock) => lock,
         Err(error) if busy(&error) => {
             let text = format!(
@@ -653,7 +669,7 @@ fn run_clients(update: &mut Update) -> Result<u8> {
         ));
         return Ok(3);
     }
-    let _lock = match super::UpdateLock::acquire() {
+    let _lock = match super::UpdateLock::acquire_borrowing(update.o.handoff.from.as_deref()) {
         Ok(lock) => lock,
         Err(error) if busy(&error) => {
             update.step(format!(

@@ -490,17 +490,25 @@ pub fn install_source(source: &str, repo: Option<&Path>, layout: &Layout) -> Res
         return result;
     }
     let version = source.strip_prefix("pseudolife-mcp==").unwrap_or(source);
+    let (archive, sums, named) = download_release(version)?;
+    install_archive(layout, version, source, &archive, &sums).map_err(named)
+}
+
+/// Downloads a release's archive for this platform and its `SHA256SUMS`
+/// from [`release_base`], with the function that names an override in an
+/// error about them.
+fn download_release(version: &str) -> Result<(Vec<u8>, String, impl Fn(String) -> String)> {
     let name = archive_name(version)?;
     let configured = std::env::var("PSEUDOLIFE_NATIVE_ARCHIVE_URL").ok();
     let base = release_base(configured.as_deref(), version)?;
     // A forgotten override outlives the test it was set for: every error
     // below names it, so the cause is visible.
     let overridden = configured.is_some_and(|v| !v.trim().is_empty());
-    let named = |detail: String| override_note(detail, &base, overridden);
     // A private runtime avoids nested Tokio runtimes in synchronous CLI callers.
     let base_clone = base.clone();
+    let named = move |detail: String| override_note(detail, &base, overridden);
     let name_clone = name.clone();
-    let (archive, sums) = std::thread::spawn(move || -> Result<(Vec<u8>, String)> {
+    let downloaded = std::thread::spawn(move || -> Result<(Vec<u8>, String)> {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -523,9 +531,50 @@ pub fn install_source(source: &str, repo: Option<&Path>, layout: &Layout) -> Res
             })
     })
     .join()
-    .map_err(|_| "release download worker failed".to_owned())?
-    .map_err(named)?;
-    install_archive(layout, version, source, &archive, &sums).map_err(named)
+    .map_err(|_| "release download worker failed".to_owned())?;
+    match downloaded {
+        Ok((archive, sums)) => Ok((archive, sums, named)),
+        Err(detail) => Err(named(detail)),
+    }
+}
+
+/// Downloads release `version`'s client for this platform, checks it against
+/// the release's `SHA256SUMS` as [`install_source`] does, and writes its
+/// executable into `directory` (a private folder the caller owns), without
+/// installing a runtime or touching the stable launcher. The path of the
+/// executable it wrote.
+pub fn stage_release(version: &str, directory: &Path) -> Result<PathBuf> {
+    let (archive, sums, named) = download_release(version)?;
+    let staged = (|| {
+        if archive.len() > ARCHIVE_LIMIT {
+            return Err("release archive exceeds the download limit".to_owned());
+        }
+        let digest = checksum(&sums, &archive_name(version)?)?;
+        if format!("{:x}", Sha256::digest(&archive)) != digest {
+            return Err("release archive checksum mismatch".into());
+        }
+        let data = unpack(&archive)?;
+        if !native_header(&data) {
+            return Err("the release archive holds no native executable for this platform".into());
+        }
+        let binary = directory.join(BINARY);
+        let mut opened = crate::board::state::create(&binary).map_err(str::to_owned)?;
+        opened
+            .file
+            .write_all(&data)
+            .and_then(|_| opened.file.sync_all())
+            .map_err(io_error)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            opened
+                .file
+                .set_permissions(fs::Permissions::from_mode(0o700))
+                .map_err(io_error)?;
+        }
+        Ok(binary)
+    })();
+    staged.map_err(named)
 }
 
 /// A download, checksum or install error, naming the override when one chose

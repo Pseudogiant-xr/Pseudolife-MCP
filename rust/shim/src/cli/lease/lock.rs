@@ -188,6 +188,10 @@ impl Lock {
         self.file = Some(file);
         Ok(true)
     }
+    /// The open, locked file while this lock holds it.
+    pub fn file(&self) -> Option<&File> {
+        self.file.as_ref()
+    }
     pub fn release(&mut self) {
         #[cfg(windows)]
         if let Some(file) = &self.file {

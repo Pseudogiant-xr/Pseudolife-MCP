@@ -10164,6 +10164,63 @@ are behind. It prints approval steps only when Codex would ask again, and
 the check compares Codex's installed copy with the daemon just deployed,
 never with a checkout at some other commit.
 
+### A newer release runs its own update
+
+From 0.26.0, a release-mode `pseudolife-mcp update` on a Docker host first
+checks whether the target release is newer than the updater running the
+command. If it is, the newer release's own updater runs the whole update,
+daemon step included. So one run applies that release's update rules,
+including changes to how the daemon itself is updated. This covers plain,
+`--daemon-only` and `--unattended` runs. Before any backup or daemon step,
+the update:
+
+1. downloads the target's client for this platform;
+2. checks it against the release's `SHA256SUMS`;
+3. writes it to a private folder beside the shim runtimes (`.staged/`
+   under the runtimes folder), which is not a runtime;
+4. runs it with the same arguments and `--tag <target>`, under the update
+   lock the first updater holds.
+
+The output says so:
+
+```text
+release <target> is newer than this updater (<version>): its own updater, fetched and checked against the release's SHA256SUMS, runs this update
+```
+
+The newer updater prints its own steps, asks any question an attended run
+asks, and installs itself as the shim runtime in its own client step. Its
+result is the run's: its exit code, its `--json` report (with the first
+updater's line first) and the `--result-file` the first updater writes from
+it. The first updater changes nothing after it, and its folder under
+`.staged/` is removed when the run ends. The newer updater keeps the
+update lock even if the first one is killed, so no second update starts
+while it runs; on Windows the newer updater ends with the first one.
+
+When the target's client cannot be downloaded, checked or started, or
+predates this hand-off, the run says why in one line and continues on its
+own code, as before:
+
+```text
+could not fetch release <target>'s client to run this update with its own code (<why>); this update continues with <version>'s code
+```
+
+There is no hand-off:
+
+- to the release already running, or on a downgrade;
+- for `--clients-only`, `--check`, `--schedule` or `--unschedule`;
+- for a checkout deploy or a host that selected a checkout engine;
+- while a legacy import waits to be resumed;
+- on a client-only machine, whose update the client steps' own hand-off
+  (next section) already gives to the new release;
+- for an `--unattended` run whose daemon already runs the target or newer,
+  or whose daemon has `updates.unattended_daemon` off. That run has no
+  daemon step to hand over, and a daemon-only host would otherwise fetch
+  the client every night just to report nothing to do.
+
+A signal sent to the first updater's process alone (`kill <pid>`) is passed
+on to the newer one. Ctrl-C at the terminal already reaches both, so it is
+not passed on twice.
+
 ### The client steps after a new shim runtime
 
 A release-mode client update (`--clients-only`, or the client half of a
@@ -10204,6 +10261,13 @@ or earlier therefore still runs the client steps with the old code: run
 release's client-step changes. The native updater hands off the same way
 as the Python one, so a single native update run applies the new
 release's client steps.
+
+The same holds for the whole update. An updater older than 0.26.0 has no
+full hand-off, so it runs its own daemon step. On such a host,
+`pseudolife-mcp update --clients-only && pseudolife-mcp update` reaches
+the release's own daemon rules: the first command moves the client to the
+release, and the second runs that release's updater, which does the whole
+update in one run.
 
 ### Changing daemon bearer settings
 

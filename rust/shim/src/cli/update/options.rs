@@ -35,6 +35,10 @@ pub(crate) struct Options {
     /// Set from the hand-off environment, never from the command line: the
     /// updater that handed this run its client steps (`clients::handoff`).
     pub handoff: super::clients::handoff::Inherited,
+    /// The arguments as given, which a full hand-off passes to the target
+    /// release's updater (`full_handoff`); never re-serialized from the
+    /// parsed fields, which `execute` adjusts.
+    pub argv: Vec<String>,
 }
 
 impl Default for Options {
@@ -73,9 +77,28 @@ impl Default for Options {
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| "http://127.0.0.1:8765".into()),
             handoff: Default::default(),
+            argv: Vec::new(),
         }
     }
 }
+
+/// The options whose value may be the next argument (`--tag 1.2.3`), as
+/// [`Options::parse`] reads them; the full hand-off rewrites the arguments
+/// with the same boundaries.
+pub(super) const VALUE_OPTIONS: &[&str] = &[
+    "--engine",
+    "--checkout",
+    "--tag",
+    "--rollback-tag",
+    "--env-file",
+    "--result-file",
+    "--schedule",
+    "--daemon-url",
+    "--keep-rollbacks",
+    "--keep-cache-hours",
+    "--health-retries",
+    "--health-delay-ms",
+];
 
 impl Options {
     pub fn parse(arguments: Vec<OsString>) -> Result<Self> {
