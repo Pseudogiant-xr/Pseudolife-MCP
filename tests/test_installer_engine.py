@@ -188,7 +188,7 @@ def test_rerun_on_an_accepted_host_reproduces_the_overlay_without_pulling(helper
     assert module.accept() == "unchanged"
 
 
-@pytest.mark.parametrize("failure,expected", [("pull", "--engine python"), ("provision", "models")])
+@pytest.mark.parametrize("failure,expected", [("pull", "registry access"), ("provision", "models")])
 def test_rust_refuses_before_any_container_when_the_image_or_models_are_unavailable(helper, failure, expected):
     module, state, repo = helper
     state["fail"] = failure
@@ -262,29 +262,32 @@ def _record_stage(tmp_path, script, engine, compose_engine, helper_exit=0):
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
 @pytest.mark.parametrize("engine,compose_engine,expected", [
-    ("python", "python", "choose --engine python"), ("", "rust", "accept"), ("rust", "rust", "accept"),
-    ("", "python", None),
+    ("", "rust", "accept"), ("rust", "rust", "accept"), ("", "python", None),
 ])
-def test_the_install_records_an_explicit_python_choice_and_accepts_rust(tmp_path, script, engine, compose_engine,
-                                                                         expected):
+def test_the_install_accepts_rust_and_records_no_python_choice(tmp_path, script, engine, compose_engine,
+                                                               expected):
+    # The Python daemon is retired: a host brought up on Python (to move after
+    # the install) records nothing, and no install writes a Python choice.
     proc, calls, output = _record_stage(tmp_path, script, engine, compose_engine)
     assert proc.returncode == 0, output
     assert "RESULT:done" in output
     recorded = [call.split("|", 1)[1] for call in calls if call.startswith("helper|")]
-    # A defaulted Python install records nothing: a later update's default may still move it.
     assert recorded == ([expected] if expected else []), recorded
+    assert not any("choose" in call for call in recorded), recorded
 
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
-@pytest.mark.parametrize("flag,installed", [("", "none"), ("rust", "none"), ("", "rust-unaccepted"),
-                                            ("python", "rust-unaccepted"), ("", "rust"), ("python", "rust")],
-                         ids=["default", "explicit-rust", "unfinished-rust", "unfinished-rust-asks-python",
-                              "rust-installed",
-                              "rust-installed-asks-python"])
-def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, flag, installed):
+@pytest.mark.parametrize("flag,installed,bank", [("", "none", False), ("rust", "none", False),
+                                                 ("", "rust-unaccepted", False), ("", "rust", False),
+                                                 ("", "python", True), ("", "none", True)],
+                         ids=["default", "explicit-rust", "unfinished-rust", "rust-installed",
+                              "python-installed", "existing-bank"])
+def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, flag, installed, bank):
     # Conductor round-4 delta: with the shim transport, no token set and no
-    # pipx or pip, stage 5b mints none. Stage 4b now knows that before its
-    # prepare pulls the image and fills the models volume.
+    # pipx or pip, stage 5b mints none. Stage 4b knows that before its
+    # prepare pulls the image and fills the models volume. The Python daemon
+    # is retired, so no path falls back to it: a new install, an existing bank
+    # and a host still on Python (moved after the install) all refuse here.
     if script.endswith(".ps1"):
         stage = _stage(script, "# -- 4b. daemon engine", "# -- 4c. create volumes")
         definition = stage[stage.index("function Invoke-EngineHelper"):stage.index("$installedEngine =")]
@@ -299,7 +302,7 @@ def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, 
                 "function Get-InstallerPython { return 'python' }\n")
         proc = ps.run(f"$ClientOnly=$false\n$Engine='{flag}'\n$rustBearer=$true\n$Transport='shim'\n"
                       "$env:PSEUDOLIFE_MCP_TOKEN=$null\n$env:PSEUDOLIFE_MCP_TOKENS=$null\n"
-                      "$engineDefaulted=$false\n$bankExisted=$false\n" + stub + stage
+                      f"$bankExisted=${str(bank).lower()}\n" + stub + stage
                       + "Write-Output \"RESULT:$composeEngine\"\n")
         calls, output = ps.logged(), _output(proc)
     else:
@@ -313,59 +316,37 @@ def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, 
         stub = ('engine_helper() { printf "helper|%s\\n" "$*" >>"$CALL_LOG"; '
                 f'case "$1" in detect) echo {installed} ;; esac; }}\n'
                 'step() { echo "STEP: $*"; }\nshim_tooling_ready() { return 1; }\nget_env() { :; }\n')
-        proc = shell.run(f"CLIENT_ONLY=''\nENGINE='{flag}'\nRUST_BEARER=1\nTRANSPORT=shim\nBANK_EXISTED=''\n"
+        proc = shell.run(f"CLIENT_ONLY=''\nENGINE='{flag}'\nRUST_BEARER=1\nTRANSPORT=shim\n"
+                         f"BANK_EXISTED='{'1' if bank else ''}'\n"
                          "unset PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKENS\n" + stub + stage
                          + 'echo "RESULT:$COMPOSE_ENGINE"\n')
         calls, output = shell.logged(), proc.stdout + proc.stderr
-    prepares = [call for call in calls if "prepare" in call]
-    python_way = "or rerun with -Engine python." if script.endswith(".ps1") else "or rerun with --engine python."
-    if flag == "python" and installed == "rust-unaccepted":
-        # The refusal's last way out works where it is offered: this
-        # checkout's own unfinished Rust install reruns as Python. (Another
-        # release's unfinished container is refused by prepare whichever
-        # engine is asked for, ops/installer_engine.py
-        # refuse_foreign_unaccepted, and that refusal names its own fix; the
-        # stub here stands for the same-release case.)
-        assert proc.returncode == 0, output
-        assert "RESULT:python" in output
-        assert [call for call in prepares if "--engine rust" in call] == []
-    elif flag == "rust" or installed in ("rust-unaccepted", "rust"):
-        # A Rust install that is not a default refuses before it pulls anything.
-        assert proc.returncode == 2, output
-        assert "cannot mint one" in output and "Nothing was pulled or started" in output
-        assert prepares == []
-        # Where an accepted Rust daemon is installed, the engine stays what
-        # detection found (`rust`, ops/installer_engine.py `detect`) and
-        # the Python engine is only switched to later, so a rerun with it meets
-        # this same refusal: the text offers it only where detection found no
-        # accepted Rust daemon.
-        assert (python_way in output) == (installed != "rust"), output
-    else:
-        assert proc.returncode == 0, output
-        assert "RESULT:python" in output
-        assert "no bearer token for the default Rust daemon" in output
-        assert [call for call in prepares if "--engine rust" in call] == []
+    assert proc.returncode == 2, output
+    assert "cannot mint one" in output and "Nothing was pulled or started" in output
+    assert "--engine python" not in output and "-Engine python" not in output, output
+    assert "no bearer token for the default Rust daemon" not in output, output
+    assert ("moves to the Rust daemon after the install, and that move needs the token too" in output) == (installed == "python" or bank), output
+    assert [call for call in calls if "prepare" in call] == []
 
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
-@pytest.mark.parametrize("token_state,defaulted,expected,installed", [
-    ("minted", True, "rust", "none"), ("present", True, "rust", "none"), ("no-shim", True, "python", "none"),
-    ("failed", True, "python", "none"), ("no-shim", False, "refused", "none"), ("present", False, "rust", "none"),
-    ("no-shim", False, "refused", "rust-unaccepted"), ("no-shim", False, "refused", "rust"),
-    ("failed", False, "refused", "rust"),
+@pytest.mark.parametrize("token_state,compose,switch,expected", [
+    ("minted", "rust", "", "rust"), ("present", "rust", "", "rust"), ("no-shim", "rust", "", "refused"),
+    ("failed", "rust", "", "refused"), ("minted", "python", "rust", "python"),
+    ("no-shim", "python", "rust", "refused"),
 ])
-def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script, token_state, defaulted, expected,
-                                                                installed):
+def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script, token_state, compose, switch,
+                                                                expected):
     # Codex P1 (round 3): with the shim transport but no pipx or pip, stage 4b
-    # predicted a bearer that stage 5b never minted.
+    # predicted a bearer that stage 5b never minted. No default falls back to
+    # Python any more: a Rust install, or a Python host's move after the
+    # install, without a bearer refuses.
+    stage = (_stage(script, "# >>> bearer refusal ways >>>", "# <<< bearer refusal ways <<<")
+             + _stage(script, "# >>> engine token >>>", "# <<< engine token <<<"))
     if script.endswith(".ps1"):
-        # The refusal endings are their own block (the bearer refusal ways).
-        stage = (_stage(script, "# >>> bearer refusal ways >>>", "# <<< bearer refusal ways <<<")
-                 + _stage(script, "# >>> engine token >>>", "# <<< engine token <<<"))
         ps = _PowerShell(tmp_path)
         proc = ps.run("function Step($text) { Write-Output \"STEP: $text\" }\n"
-                      f"$installedEngine='{installed}'\n"
-                      f"$composeEngine='rust'\n$engineDefaulted=${'true' if defaulted else 'false'}\n"
+                      f"$composeEngine='{compose}'\n$switchEngine='{switch}'\n"
                       f"$engineFiles=@('C:\\fixture\\engine.yml')\n$tokenState='{token_state}'\n" + stage
                       + "Write-Output \"RESULT:$composeEngine|$($engineFiles -join ',')\"\n")
         output = _output(proc)
@@ -373,51 +354,39 @@ def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script
         variants = _bash_variants()
         if not variants:
             pytest.skip("Bash unavailable")
-        # The refusal endings are their own block (the bearer refusal ways).
-        stage = (_stage(script, "# >>> bearer refusal ways >>>", "# <<< bearer refusal ways <<<")
-                 + _stage(script, "# >>> engine token >>>", "# <<< engine token <<<"))
         shell = _Shell(variants[0], tmp_path)
         proc = shell.run('step() { echo "STEP: $*"; }\n'
-                         f"INSTALLED_ENGINE={installed}\n"
-                         f"COMPOSE_ENGINE=rust\nENGINE_DEFAULTED='{'1' if defaulted else ''}'\n"
+                         f"COMPOSE_ENGINE={compose}\nSWITCH_ENGINE='{switch}'\n"
                          f"engine_files=(/fixture/engine.yml)\nTOKEN_STATE='{token_state}'\n" + stage
                          + 'echo "RESULT:$COMPOSE_ENGINE|${engine_files[*]-}"\n')
         output = proc.stdout + proc.stderr
+    assert "python after all" not in output, output
     if expected == "refused":
         assert proc.returncode == 2, output
-        assert "needs its bearer token" in output and "The daemon was not started" in output
-        # As at stage 4b: no Python-engine rerun where an accepted Rust daemon is installed.
-        python_way = "or rerun with -Engine python." if script.endswith(".ps1") else "or rerun with --engine python."
-        assert (python_way in output) == (installed != "rust"), output
+        assert "needs its bearer token" in output and "Nothing was started" in output
+        assert "--engine python" not in output and "-Engine python" not in output, output
+        assert ("moves to the Rust daemon after the install, and that move needs the token too" in output) == (switch == "rust"), output
         return
     assert proc.returncode == 0, output
     result = next(line for line in output.splitlines() if line.startswith("RESULT:"))
     engine, files = result[len("RESULT:"):].split("|")
-    assert engine == expected
-    assert bool(files) == (expected == "rust")
-    assert ("python after all" in output) == (expected == "python")
+    assert engine == expected and files
 
 
-SWITCH_NEEDS_TOKEN = "Switching to the Python daemon needs that token too"
-
-
-def _switch_rerun(script):
-    flag = "-Engine python" if script.endswith(".ps1") else "--engine python"
-    return f"rerun with {flag} and the install switches this host after it."
+MOVE_NEEDS_TOKEN = "moves to the Rust daemon after the install, and that move needs the token too"
 
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
-@pytest.mark.parametrize("flag,token", [("python", "none"), ("python", "no-token"), ("", "none"), ("rust", "none"),
-                                        ("python", "set")],
-                         ids=["asks-python", "asks-python-no-token", "no-flag", "asks-rust", "asks-python-token-set"])
-def test_an_accepted_rust_host_asking_for_python_is_told_the_switch_needs_the_token(tmp_path, script, flag, token):
-    # #1968 case 2: on an accepted Rust host --engine python only schedules
-    # the switch, and pseudolife-mcp update makes it only with the bearer
-    # (rust/cli_harness/test_update_transactions.py
-    # test_release_switch_off_rust_needs_the_bearer) and from the shim. With
-    # no bearer to come the refusal says so and names the rerun that works.
+@pytest.mark.parametrize("installed,bank", [("python", True), ("none", True), ("rust", True)],
+                         ids=["python-installed", "existing-bank", "rust-installed"])
+@pytest.mark.parametrize("token", ["set", "none"])
+def test_a_host_still_on_python_moves_to_rust_after_the_install(tmp_path, script, installed, bank, token):
+    # The Python daemon is retired: a host still on it, or a bank that exists
+    # without a daemon, is brought up as it is and moved to Rust after the
+    # install through pseudolife-mcp update from the shim; an accepted Rust
+    # host stays. Without a bearer to come (no pipx or pip to mint one), the
+    # move is refused before anything is pulled, and the refusal says so.
     ps = script.endswith(".ps1")
-    rust_bearer = token != "no-token"
     if ps:
         stage = _stage(script, "# -- 4b. daemon engine", "# -- 4c. create volumes")
         definition = stage[stage.index("function Invoke-EngineHelper"):stage.index("$installedEngine =")]
@@ -426,14 +395,14 @@ def test_an_accepted_rust_host_asking_for_python_is_told_the_switch_needs_the_to
         stub = ("function Invoke-EngineHelper {\n"
                 f"    Add-Content -LiteralPath '{shell.calls}' -Value ('helper|' + (@($args) -join ' '))\n"
                 "    $global:LASTEXITCODE = 0\n"
-                "    if ($args[0] -eq 'detect') { return 'rust' }\n"
+                f"    if ($args[0] -eq 'detect') {{ return '{installed}' }}\n"
                 "    if ($args[0] -eq 'prepare') { return 'C:\\fixture\\engine.yml' }\n}\n"
                 "function Test-ShimToolingReady($python) { return $false }\n"
                 "function Get-EnvValue($name) { return $null }\n")
         token_env = "'fixture-bearer'" if token == "set" else "$null"
-        proc = shell.run(f"$ClientOnly=$false\n$Engine='{flag}'\n$rustBearer=${str(rust_bearer).lower()}\n"
+        proc = shell.run("$ClientOnly=$false\n$Engine=''\n$rustBearer=$true\n"
                          f"$Transport='shim'\n$env:PSEUDOLIFE_MCP_TOKEN={token_env}\n$env:PSEUDOLIFE_MCP_TOKENS=$null\n"
-                         "$engineDefaulted=$false\n$bankExisted=$true\n" + stub + stage
+                         f"$bankExisted=${str(bank).lower()}\n" + stub + stage
                          + "Write-Output \"RESULT:$composeEngine|$switchEngine\"\n")
         output = _output(proc)
     else:
@@ -445,56 +414,41 @@ def test_an_accepted_rust_host_asking_for_python_is_told_the_switch_needs_the_to
         stage = stage.replace(definition, "").replace("shim_tooling_ready() {", "shim_tooling_ready_real() {")
         shell = _Shell(variants[0], tmp_path)
         stub = ('engine_helper() { printf "helper|%s\\n" "$*" >>"$CALL_LOG"; '
-                'case "$1" in detect) echo rust ;; prepare) echo /fixture/engine.yml ;; esac; }\n'
+                f'case "$1" in detect) echo {installed} ;; prepare) echo /fixture/engine.yml ;; esac; }}\n'
                 'step() { echo "STEP: $*"; }\nshim_tooling_ready() { return 1; }\nget_env() { :; }\n')
         token_env = "export PSEUDOLIFE_MCP_TOKEN=fixture-bearer\n" if token == "set" else "unset PSEUDOLIFE_MCP_TOKEN\n"
-        proc = shell.run(f"CLIENT_ONLY=''\nENGINE='{flag}'\nRUST_BEARER='{'1' if rust_bearer else ''}'\nTRANSPORT=shim\n"
-                         f"BANK_EXISTED=1\nunset PSEUDOLIFE_MCP_TOKENS\n{token_env}" + stub + stage
+        proc = shell.run(f"CLIENT_ONLY=''\nENGINE=''\nRUST_BEARER=1\nTRANSPORT=shim\n"
+                         f"BANK_EXISTED='{'1' if bank else ''}'\nunset PSEUDOLIFE_MCP_TOKENS\n{token_env}" + stub + stage
                          + 'echo "RESULT:$COMPOSE_ENGINE|$SWITCH_ENGINE"\n')
         output = proc.stdout + proc.stderr
+    moves = installed != "rust"
     if token == "set":
-        # The near miss: with a bearer to come, the install keeps Rust and
-        # records the switch it runs after the install.
         assert proc.returncode == 0, output
-        assert "RESULT:rust|python" in output, output
-        assert "switching to python after the install" in output, output
+        assert (f"RESULT:{'python|rust' if moves else 'rust|'}" in output), output
+        assert ("switching to rust after the install" in output) == moves, output
         return
     assert proc.returncode == 2, output
     assert "needs its bearer token" in output and "Nothing was pulled or started" in output, output
-    # Never the Python rerun: this host keeps Rust whatever the flag.
-    assert ("or rerun with -Engine python." if ps else "or rerun with --engine python.") not in output, output
-    if token == "no-token":
-        # The true cause is the flag, not missing pip tooling.
-        assert ("cannot mint one (-NoToken" if ps else "cannot mint one (--no-token") in output, output
-        assert "install pipx, then rerun" not in output, output
-        # Under --no-token a token in ops/.env alone does not pass stage 4b
-        # (RUST_BEARER), so each fix names dropping the flag.
-        assert ("rerun with -NoToken:$false -Transport shim, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and rerun "
-                "with -NoToken:$false" if ps else
-                "rerun with --transport shim and without --no-token, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and "
-                "rerun without --no-token") in output, output
-    else:
-        assert "cannot mint one (no pipx or pip-capable Python" in output, output
-    switched = flag == "python"
-    assert (SWITCH_NEEDS_TOKEN in output) == switched, output
-    assert (_switch_rerun(script) in output) == switched, output
-    if switched:
+    assert "cannot mint one (no pipx or pip-capable Python" in output, output
+    assert "--engine python" not in output and "-Engine python" not in output, output
+    assert (MOVE_NEEDS_TOKEN in output) == moves, output
+    if moves:
         assert "and the shim (pipx or a pip-capable Python >= 3.10)" in output, output
-    assert [call for call in (shell.logged()) if "prepare" in call] == []
+    assert [call for call in shell.logged() if "prepare" in call] == []
 
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
-@pytest.mark.parametrize("flag", ["python", ""])
+@pytest.mark.parametrize("switch", ["rust", ""])
 @pytest.mark.parametrize("token_state", ["no-shim", "failed"])
-def test_stage_5b_tells_an_accepted_rust_host_the_switch_needs_the_token(tmp_path, script, flag, token_state):
-    # #1968 case 2 at stage 5b: a predicted bearer that was never minted.
+def test_stage_5b_tells_a_python_host_the_move_needs_the_token(tmp_path, script, switch, token_state):
+    # A predicted bearer that was never minted, at stage 5b.
     ways = ("# >>> bearer refusal ways >>>", "# <<< bearer refusal ways <<<")
+    stage = _stage(script, *ways) + _stage(script, "# >>> engine token >>>", "# <<< engine token <<<")
+    compose = "python" if switch else "rust"
     if script.endswith(".ps1"):
-        stage = _stage(script, *ways) + _stage(script, "# >>> engine token >>>", "# <<< engine token <<<")
         ps = _PowerShell(tmp_path)
         proc = ps.run("function Step($text) { Write-Output \"STEP: $text\" }\n"
-                      f"$installedEngine='rust'\n$switchEngine='{flag}'\n"
-                      f"$composeEngine='rust'\n$engineDefaulted=$false\n"
+                      f"$switchEngine='{switch}'\n$composeEngine='{compose}'\n"
                       f"$engineFiles=@('C:\\fixture\\engine.yml')\n$tokenState='{token_state}'\n" + stage
                       + "Write-Output \"RESULT:$composeEngine\"\n")
         output = _output(proc)
@@ -502,20 +456,17 @@ def test_stage_5b_tells_an_accepted_rust_host_the_switch_needs_the_token(tmp_pat
         variants = _bash_variants()
         if not variants:
             pytest.skip("Bash unavailable")
-        stage = _stage(script, *ways) + _stage(script, "# >>> engine token >>>", "# <<< engine token <<<")
         shell = _Shell(variants[0], tmp_path)
         proc = shell.run('step() { echo "STEP: $*"; }\n'
-                         f"INSTALLED_ENGINE=rust\nSWITCH_ENGINE='{flag}'\n"
-                         f"COMPOSE_ENGINE=rust\nENGINE_DEFAULTED=''\n"
+                         f"SWITCH_ENGINE='{switch}'\nCOMPOSE_ENGINE={compose}\n"
                          f"engine_files=(/fixture/engine.yml)\nTOKEN_STATE='{token_state}'\n" + stage
                          + 'echo "RESULT:$COMPOSE_ENGINE"\n')
         output = proc.stdout + proc.stderr
     assert proc.returncode == 2, output
-    assert "needs its bearer token" in output and "The daemon was not started" in output, output
-    assert ("or rerun with -Engine python." if script.endswith(".ps1") else "or rerun with --engine python.") \
-        not in output, output
-    assert (SWITCH_NEEDS_TOKEN in output) == (flag == "python"), output
-    assert (_switch_rerun(script) in output) == (flag == "python"), output
+    assert "needs its bearer token" in output and "Nothing was started" in output, output
+    assert "--engine python" not in output and "-Engine python" not in output, output
+    assert (MOVE_NEEDS_TOKEN in output) == (switch == "rust"), output
+
 
 
 def test_a_token_only_change_recreates_the_daemon_before_the_switch(tmp_path, monkeypatch):
@@ -680,10 +631,12 @@ def test_a_foreign_unfinished_rust_container_is_refused_before_the_bearer(tmp_pa
         assert "needs its bearer token" not in output, output
     else:
         # The near miss: this checkout's own unfinished install keeps the
-        # bearer refusal, and its Python rerun, which works there.
+        # bearer refusal, and no Python rerun is offered (the Python daemon
+        # is retired).
         assert proc.returncode == 2, output
         assert "needs its bearer token" in output and "Nothing was pulled or started" in output, output
-        assert python_way in output, output
+        assert python_way not in output, output
+        assert "engine python" not in output, output
         assert "docker rm -f" not in output, output
     assert "RESULT:" not in output
 
@@ -718,7 +671,7 @@ def test_python_and_checkout_selections(helper):
 def test_unreleased_checkout_version_refuses_rust(helper):
     module, state, repo = helper
     _write_crate(repo, "0.23.0.dev1")
-    with pytest.raises(module.Refusal, match="--engine python"):
+    with pytest.raises(module.Refusal, match="check out a release tag"):
         module.prepare(repo, "rust")
     assert not state["calls"] or all(c[0] == "inspect" for c in state["calls"])
 
@@ -729,7 +682,7 @@ def test_the_checkout_version_is_the_native_crate_not_pyproject(helper):
     module, state, repo = helper
     (repo / "pyproject.toml").write_text('[project]\nversion = "0.99.0"\n')
     assert module.checkout_version(repo) == "0.23.0"
-    message = "this checkout's rust/shim/Cargo.toml; rerun with --engine python"
+    message = "this checkout's rust/shim/Cargo.toml; check out a release tag"
     (repo / "rust" / "shim" / "Cargo.toml").write_text('[package]\nname = "pseudolife-stdio"\n')
     with pytest.raises(module.Unavailable, match=message):
         module.checkout_version(repo)
@@ -777,16 +730,15 @@ def _stage(script, start, end):
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
 @pytest.mark.parametrize("installed,flag,bank,compose_engine,switch", [
-    # Rust is the default for a new install since G2.
+    # A new install runs Rust.
     ("none", "", "", "rust", ""), ("none", "rust", "", "rust", ""),
-    # A defaulted install over an existing bank stays Python: update's default moves it later.
-    ("none", "", "1", "python", ""),
-    # An existing bank with no daemon reaches Rust through update's checks.
-    ("none", "rust", "1", "python", "rust"),
-    ("python", "", "1", "python", ""), ("python", "rust", "1", "python", "rust"),
-    ("rust", "", "1", "rust", ""), ("rust", "python", "1", "rust", "python"), ("rust", "rust", "1", "rust", ""),
-    ("rust-checkout", "python", "1", "rust-checkout", "python"),
-    ("rust-unaccepted", "", "1", "rust", ""), ("rust-unaccepted", "python", "1", "python", ""),
+    # An existing bank with no daemon, and a host still on the retired Python
+    # daemon, come up as they are and reach Rust through update's checks.
+    ("none", "", "1", "python", "rust"), ("none", "rust", "1", "python", "rust"),
+    ("python", "", "1", "python", "rust"), ("python", "rust", "1", "python", "rust"),
+    ("rust", "", "1", "rust", ""), ("rust", "rust", "1", "rust", ""),
+    ("rust-checkout", "", "1", "rust-checkout", ""),
+    ("rust-unaccepted", "", "1", "rust", ""),
 ])
 def test_engine_stage_keeps_the_installed_engine_and_defers_a_switch(tmp_path, script, installed, flag, bank,
                                                                      compose_engine, switch):
@@ -892,6 +844,35 @@ def test_engine_flag_refusals(tmp_path, script, case):
         assert proc.returncode == 2
         assert ("client-only" if client else "token") in output.lower()
         assert "Nothing was changed" in output
+
+
+@pytest.mark.parametrize("script", ["install.sh", "install.ps1", "install-native.sh", "install-native.ps1"])
+def test_engine_python_is_refused_before_anything_changes(tmp_path, script):
+    # The Python daemon is retired (maintainer, 27 November 2026): every
+    # installer refuses --engine python in its flag block, before preflight,
+    # so nothing is pulled, created or switched; the near miss --engine rust
+    # passes the same block (test_engine_flag_refusals "allowed").
+    stage = _stage(script, "# >>> engine flag >>>", "# <<< engine flag <<<")
+    env = tmp_path / "fixture.env"
+    env.write_text("PSEUDOLIFE_MCP_TOKEN=fixture\n")
+    if script.endswith(".ps1"):
+        ps = _PowerShell(tmp_path)
+        # ValidateSet lets "Python" through: the block lowercases it first.
+        proc = ps.run("$ClientOnly=$false\n$NoToken=$false\n$Engine='Python'\n"
+                      f"$Transport='shim'\n$envFile='{env}'\n"
+                      + stage + "Write-Output \"ENGINE:$Engine\"\n")
+        output, flag = _output(proc), "-Engine python"
+    else:
+        variants = _bash_variants()
+        if not variants:
+            pytest.skip("Bash unavailable")
+        shell = _Shell(variants[0], tmp_path)
+        proc = shell.run(f"CLIENT_ONLY=''\nNO_TOKEN=''\nTRANSPORT=shim\nenv_file='{shell.path(env)}'\n"
+                         "ENGINE=python\n" + stage + 'echo "ENGINE:$ENGINE"\n')
+        output, flag = proc.stdout + proc.stderr, "--engine python"
+    assert proc.returncode == 2, output
+    assert f"{flag} is retired" in output and "Nothing was changed" in output, output
+    assert "ENGINE:" not in output, output
 
 
 def test_no_volume_is_created_before_the_engine_stage_can_refuse():
@@ -1004,7 +985,10 @@ def test_update_treats_the_installer_overlay_as_its_own_transient_file(tmp_path)
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
 @pytest.mark.parametrize("case", ["no-bearer", "rust-unavailable"])
-def test_the_default_engine_falls_back_to_python(tmp_path, script, case):
+def test_no_default_falls_back_to_python(tmp_path, script, case):
+    # The Python daemon is retired: without a bearer the install refuses
+    # before it asks for anything, and an engine step that prepares no Rust
+    # overlay stops the install instead of starting the base file's image.
     bearer = case != "no-bearer"
     if script.endswith(".ps1"):
         stage = _stage(script, "# -- 4b. daemon engine", "# -- 4c. create volumes")
@@ -1034,8 +1018,13 @@ def test_the_default_engine_falls_back_to_python(tmp_path, script, case):
                          "PSEUDOLIFE_MCP_TOKEN=fixture-bearer\n" + stub
                          + stage.replace(definition, "") + 'echo "RESULT:$COMPOSE_ENGINE"\n')
         calls, output = shell.logged(), proc.stdout + proc.stderr
-    assert proc.returncode == 0, output
-    assert "RESULT:python" in output
-    [prepare] = [call for call in calls if "prepare" in call]
-    # Only a defaulted Rust prepare may fall back; without a bearer it never asks for Rust.
-    assert ("--default" in prepare) == bearer and ("--engine rust" in prepare) == bearer
+    assert "RESULT:" not in output, output
+    prepares = [call for call in calls if "prepare" in call]
+    if not bearer:
+        assert proc.returncode == 2, output
+        assert "needs its bearer token" in output and prepares == [], output
+        return
+    assert proc.returncode == 1, output
+    assert "prepared no Rust daemon overlay" in output, output
+    [prepare] = prepares
+    assert "--engine rust" in prepare and "--default" not in prepare, prepare

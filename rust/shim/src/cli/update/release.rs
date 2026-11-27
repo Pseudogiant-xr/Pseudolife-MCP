@@ -960,6 +960,11 @@ impl Update {
         self.inspect_active_import(true)
     }
 
+    /// [`Self::active_import`] without retiring a finished import's pointer.
+    pub(super) fn inspect_import(&self) -> Result<Option<ImportRecovery>> {
+        self.inspect_active_import(false)
+    }
+
     fn inspect_active_import(&self, retire: bool) -> Result<Option<ImportRecovery>> {
         let labels = engine::host_labels(self, DAEMON_CONTAINER);
         let on_bridge = labels[engine::ENGINE_LABEL] == "python"
@@ -1084,7 +1089,9 @@ impl Update {
         let _lock = if locked {
             None
         } else {
-            Some(UpdateLock::acquire()?)
+            Some(UpdateLock::acquire_borrowing(
+                self.o.handoff.from.as_deref(),
+            )?)
         };
         let Some(recovery) = self.active_import()? else {
             return Ok(());
@@ -1173,83 +1180,61 @@ impl Update {
         } else {
             "python"
         };
-        if self.o.unattended && selected == "python" && self.python_manifest_missing(&target) {
-            return Err(UpdateError::attended(
-                "The release has no Python daemon image.",
-            ));
+        if selected == "python" {
+            self.refuse_staying_on_python()?;
         }
-        let (choice, defaulted, probe_legacy) = match self.o.engine.clone() {
-            Some(engine) => (engine, false, false),
-            None => self.default_choice(selected, &labels, &target),
+        let (choice, defaulted) = match self.o.engine.clone() {
+            Some(engine) => (engine, false),
+            None => self.default_choice(selected, &target)?,
         };
         // Engine selection, and every update of a Rust host, records an
         // accepted activation so the next update can verify it.
         let activating = self.o.engine.is_some() || choice == "rust";
         if current.as_deref() == Some(&target) && !self.o.reinstall && choice == selected {
-            if self.o.engine.as_deref() == Some("python")
-                && let Err(error) = engine::record_choice("python")
-            {
-                // An explicit choice is kept even when there is nothing to deploy.
-                self.warn(format!(
-                    "the Python choice could not be recorded ({}); a later update may move this host to the default engine",
-                    error.message
-                ));
-            }
             self.step(format!("the daemon already runs {target}; nothing to do (--reinstall to recreate it anyway, --clients-only for the shim and plugin)"));
             return Ok(());
         }
         if !self.o.daemon_only {
             // Before the backup and the daemon, since the client steps run
-            // last; and outside the default-engine attempt, whose early
-            // refusals fall back to the host's own engine. An unattended
-            // run updates the daemon alone instead of refusing.
+            // last. An unattended run updates the daemon alone instead of
+            // refusing.
             self.refuse_tunnel_move_before_daemon()?;
         }
         if defaulted {
-            // The default never blocks an ordinary update: a move that refuses
-            // before the backup falls back to the host's own engine.
+            // The Python daemon is retired: a Python host moves to Rust, and a
+            // move that refuses before the backup leaves the Python daemon
+            // as it was instead of updating it in place.
             self.defaulted_engine = true;
             self.release_started = false;
             let attempt = self.deploy_release_as(
                 &choice,
                 activating,
                 &target,
-                current.clone(),
-                previous.clone(),
-                before.clone(),
-                None,
-                probe_legacy,
+                current,
+                previous,
+                before,
+                before_recreate,
             );
-            match attempt {
-                Err(error) if !self.release_started => {
-                    self.defaulted_engine = false;
-                    self.discard_default_attempt();
-                    if self.legacy_attempt {
-                        return Err(error);
-                    }
+            if let Err(error) = &attempt
+                && !self.release_started
+            {
+                self.defaulted_engine = false;
+                self.discard_default_attempt();
+                if !self.legacy_attempt {
                     // The refusal's whole first line, its fix included.
                     let reason = error.message.lines().next().unwrap_or("").trim();
                     self.warn(format!(
                         "not moving to the {choice} daemon this time: {reason}"
                     ));
-                    self.step(format!("staying on the {selected} daemon for this update; nothing was recorded, so the next attended update tries again (--engine {selected} keeps it)"));
-                    if current.as_deref() == Some(&target) && !self.o.reinstall {
-                        self.step(format!("the daemon already runs {target}; nothing to do"));
-                        return Ok(());
+                    self.step(format!(
+                        "the {selected} daemon was left as it was and nothing was deployed; it is retired and gets no updates, so fix the cause above and run pseudolife-mcp update again"
+                    ));
+                    if error.message == engine::NO_BEARER {
+                        self.bearer_handover_hint(&target);
                     }
-                    return self.deploy_release_as(
-                        selected,
-                        false,
-                        &target,
-                        current,
-                        previous,
-                        before,
-                        before_recreate,
-                        false,
-                    );
                 }
-                other => return other,
             }
+            return attempt;
         }
         let result = self.deploy_release_as(
             &choice,
@@ -1259,15 +1244,25 @@ impl Update {
             previous,
             before,
             before_recreate,
-            probe_legacy,
         );
-        if result.is_ok()
-            && self.o.engine.as_deref() == Some("python")
-            && engine::record_choice("python").is_err()
+        if selected == "python"
+            && choice == DEFAULT_ENGINE
+            && result
+                .as_ref()
+                .is_err_and(|error| error.message == engine::NO_BEARER)
         {
-            self.warn("the switch succeeded, but the Python choice could not be recorded; a later update may move this host to the default engine");
+            self.bearer_handover_hint(&target);
         }
         result
+    }
+    /// The way out for a Python daemon that runs without a bearer: adding
+    /// one changes its bearer settings, which only the explicit handover
+    /// does, and the clients registered without one need it too.
+    fn bearer_handover_hint(&mut self, target: &str) {
+        let url = &self.o.daemon_url;
+        self.step(format!(
+            "this daemon runs without a bearer: set PSEUDOLIFE_MCP_TOKEN in the host env file, run pseudolife-mcp update --reinstall --daemon-only --allow-auth-change --env-file <that file> --tag {target} --daemon-url {url} (the bearer handover, on the Python daemon), then pseudolife-mcp update --daemon-url {url} to move to the Rust daemon, and give this machine's clients the bearer with pseudolife-mcp connect {url} --token-file <a file holding that token>"
+        ));
     }
     fn prepare_release(
         &mut self,
@@ -1314,9 +1309,13 @@ impl Update {
             // one) answers any bearer: read it with the configured one.
             let running = engine::daemon_token(&running_config(&context.running))
                 .unwrap_or_else(|_| token.clone());
-            if before.is_none_or(|v| v["status"] != "ok")
-                || !seams::authenticated_read(&self.o.daemon_url, &running)
-            {
+            if before.is_none_or(|v| v["status"] != "ok") {
+                return Err(UpdateError::usage(format!(
+                    "the running daemon does not answer healthy at {} and the update reads its bank before it changes the engine; start it (docker start pseudolife-mcp-postgres pseudolife-mcp-daemon), then retry; nothing was changed",
+                    self.o.daemon_url
+                )));
+            }
+            if !seams::authenticated_read(&self.o.daemon_url, &running) {
                 return Err(UpdateError::usage(
                     "the running daemon did not pass an authenticated bank read; check the configured daemon endpoint and bearer before retrying",
                 ));
@@ -1342,10 +1341,9 @@ impl Update {
         previous: Option<String>,
         before: Option<Value>,
         before_recreate: Option<&mut dyn FnMut() -> Result<()>>,
-        probe_legacy: bool,
     ) -> Result<()> {
         let prepared = self.prepare_release(choice, activating, target, before.as_ref())?;
-        if choice == "rust" || probe_legacy {
+        if choice == "rust" {
             let bank = prepared
                 .import_status(self)
                 .inspect_err(|_| self.legacy_attempt = true)?;
@@ -1369,13 +1367,8 @@ impl Update {
                         "legacy import requires a bank and state backup; retry without --no-backup; nothing was deployed",
                     ));
                 }
-                let rust = if choice == "rust" {
-                    prepared
-                } else {
-                    self.prepare_release("rust", true, target, before.as_ref())?
-                };
                 return self.import_release(
-                    rust,
+                    prepared,
                     target,
                     current.as_deref(),
                     previous.as_deref(),
@@ -1419,19 +1412,6 @@ impl Update {
             before_recreate,
         )?;
         Ok(())
-    }
-
-    fn python_manifest_missing(&self, target: &str) -> bool {
-        let image = format!("{PYTHON_IMAGE}:{target}");
-        let (code, output) = self.docker_call(&["manifest", "inspect", &image]);
-        code != 0
-            && output.lines().any(|line| {
-                let lower = line.trim().to_ascii_lowercase();
-                let reason = lower
-                    .strip_prefix("error response from daemon: ")
-                    .unwrap_or(&lower);
-                reason.starts_with("no such manifest:") || reason.starts_with("manifest unknown")
-            })
     }
 
     fn release_disk(&mut self, prepared: &PreparedRelease) -> Result<Option<String>> {
@@ -1866,8 +1846,8 @@ impl Update {
             Some(backups) => backups,
             None => release_backup(self)?,
         };
-        // A backup changes nothing on the host: a refused one still lets a
-        // defaulted move fall back to the ordinary update.
+        // A backup changes nothing on the host: a refused one still counts
+        // as a move that refused before it started.
         self.release_started = true;
         if let Some(callback) = before_recreate {
             callback()?;
@@ -2595,61 +2575,68 @@ fn config_check_args(config: &Value, volume_exists: impl Fn(&str) -> bool) -> Ve
 /// The engine a Docker host that never chose one gets (G2). A host chose when
 /// it runs Rust or recorded an accepted selection (`--engine python` leaves one).
 pub(super) const DEFAULT_ENGINE: &str = "rust";
+/// Why a scheduled run holds on a Python host.
+pub(super) const PYTHON_RETIRED_HOLD: &str = "The Python daemon is retired, and moving this host to the Rust daemon needs an attended update: run pseudolife-mcp update in a terminal.";
 
 impl Update {
-    /// An unchosen host moves to the default engine on an attended update when
-    /// the target release publishes it; unattended runs never change engines.
-    /// `(choice, defaulted)`. A host chose when it runs Rust, carries an
-    /// activation label, or recorded an accepted selection or an explicit
-    /// choice (an unreadable record counts as chosen). The default applies
-    /// only on an attended update with a backup.
-    // The final value permits checking a Python host for legacy import even
-    // when the ordinary engine policy would keep it on Python.
-    fn default_choice(
-        &mut self,
-        selected: &str,
-        labels: &Value,
-        target: &str,
-    ) -> (String, bool, bool) {
-        // This engine preference governs new work. Recovery of a previously
-        // started import is handled before choosing the next engine.
-        if self.o.unattended
-            || self.o.no_backup
-            || self.o.allow_auth_change
-            || DEFAULT_ENGINE == selected
-        {
-            return (selected.to_owned(), false, false);
+    /// The Python daemon is retired (maintainer, 27 November 2026): a release
+    /// update never leaves a host on it. The runs that cannot make the move
+    /// refuse before anything changes, naming the run that can.
+    fn refuse_staying_on_python(&self) -> Result<()> {
+        if self.o.unattended {
+            return Err(UpdateError::attended(PYTHON_RETIRED_HOLD));
         }
-        let chosen = labels[engine::ACTIVATION_LABEL]
-            .as_str()
-            .is_some_and(|s| !s.is_empty())
-            || !matches!(engine::selection(&engine::release_accepted()), Ok(None))
-            || match engine::recorded_choice() {
-                Ok(choice) => choice.is_some(),
-                Err(reason) => {
-                    self.warn(format!(
-                        "cannot read the engine choice in {} ({reason}); this host keeps its engine. Fix or remove that file to let the default engine apply",
-                        engine::choice_path().display()
-                    ));
-                    true
-                }
-            };
-        if chosen {
-            return (selected.to_owned(), false, false);
+        if self.o.no_backup {
+            return Err(UpdateError::usage(
+                "this host runs the retired Python daemon, and the move to the Rust daemon needs the bank and state backup; retry without --no-backup. Nothing was changed",
+            ));
+        }
+        Ok(())
+    }
+    /// `(choice, defaulted)`: a Rust host keeps Rust, and a Python host moves
+    /// to Rust (defaulted), whatever an earlier `--engine python` recorded.
+    /// The move needs the target release's Rust image, so a release that does
+    /// not publish one is refused, never deployed on Python.
+    fn default_choice(&mut self, selected: &str, target: &str) -> Result<(String, bool)> {
+        if DEFAULT_ENGINE == selected {
+            return Ok((selected.to_owned(), false));
+        }
+        if self.o.allow_auth_change {
+            // The one run that stays: the move needs a bearer, and a host
+            // with none gets one only through this handover, which update
+            // never combines with an engine change.
+            self.step(format!(
+                "the bearer handover runs on the retired {selected} daemon; the next attended pseudolife-mcp update moves this host to the {DEFAULT_ENGINE} daemon"
+            ));
+            return Ok((selected.to_owned(), false));
+        }
+        match engine::recorded_choice() {
+            Ok(None) => {}
+            Ok(Some(_)) => self.warn(format!(
+                "this host recorded a Python daemon choice in {}; the Python daemon is retired, so that choice no longer applies",
+                engine::choice_path().display()
+            )),
+            Err(reason) => self.warn(format!(
+                "cannot read the engine choice in {} ({reason}); the Python daemon is retired, so no recorded choice keeps it",
+                engine::choice_path().display()
+            )),
         }
         let image = format!("{RUST_IMAGE}:{target}");
-        if self.docker_call(&["manifest", "inspect", &image]).0 != 0 {
-            self.step(format!(
-                "could not confirm a published {DEFAULT_ENGINE} daemon image for {target} (docker manifest inspect); checking this bank before choosing the update path"
-            ));
-            return (selected.to_owned(), false, true);
+        // Only a conclusive "not published" refuses here: a probe that cannot
+        // tell (a registry proxy the CLI lacks, a remote engine) leaves it to
+        // the pull, which refuses before any backup just the same.
+        let (code, output) = self.docker_call(&["manifest", "inspect", &image]);
+        if code != 0 && manifest_unknown(&output) {
+            return Err(UpdateError::usage(format!(
+                "could not confirm a published {DEFAULT_ENGINE} daemon image for {target} (docker manifest inspect {image}). This host runs the retired {selected} daemon, and an update moves it to the {DEFAULT_ENGINE} daemon; check registry access (or name a release that publishes it with --tag <version>), then retry. Nothing was changed"
+            )));
         }
         self.step(format!(
-            "moving this host to the {DEFAULT_ENGINE} daemon, the default since G2 (keep {selected} with --engine {selected})"
+            "moving this host from the retired {selected} daemon to the {DEFAULT_ENGINE} daemon"
         ));
-        (DEFAULT_ENGINE.to_owned(), true, false)
+        Ok((DEFAULT_ENGINE.to_owned(), true))
     }
-    /// Remove what a defaulted attempt pulled or created, so falling back
+    /// Remove what a defaulted attempt pulled or created, so a refused move
     /// leaves the host as it found it.
     fn discard_default_attempt(&mut self) {
         let mut removals: Vec<(&str, String)> = Vec::new();
@@ -2662,7 +2649,7 @@ impl Update {
         for (kind, name) in removals {
             if self.docker_call(&[kind, "rm", &name]).0 != 0 {
                 self.warn(format!(
-                    "could not remove {name} after falling back (docker {kind} rm); remove it by hand if the disk is short"
+                    "could not remove {name} after the refused move (docker {kind} rm); remove it by hand if the disk is short"
                 ));
             }
         }
@@ -2781,6 +2768,18 @@ impl Update {
         }
         Ok(())
     }
+}
+
+/// Whether `docker manifest inspect` said the tag is not published (rather
+/// than that it could not ask).
+fn manifest_unknown(output: &str) -> bool {
+    output.lines().any(|line| {
+        let lower = line.trim().to_ascii_lowercase();
+        let reason = lower
+            .strip_prefix("error response from daemon: ")
+            .unwrap_or(&lower);
+        reason.starts_with("no such manifest:") || reason.starts_with("manifest unknown")
+    })
 }
 
 fn storage_pg(no_backup: bool, resolve: impl FnOnce() -> Result<String>) -> Result<Option<String>> {

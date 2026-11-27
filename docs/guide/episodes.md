@@ -298,7 +298,10 @@ forwards no session id, and no SessionEnd hook is written, so an install
 wired this way has no hook-registered identity (tier 3) and no hook-driven
 episode close: the idle reaper closes the episode instead, and the
 briefing's `episode="<id>"` handle is the concurrency-correct attribution
-channel. For the full lifecycle, use the plugin.
+channel. For the full lifecycle, use the plugin. `pseudolife-mcp briefing`
+reads its bearer from `PSEUDOLIFE_MCP_TOKEN_FILE` (the installer's setting)
+when that is set, and otherwise from `PSEUDOLIFE_MCP_TOKEN`, as
+`prompt-hook` and the MCP shim do; an unusable token file sends no brief.
 
 ## Episodes + tags
 

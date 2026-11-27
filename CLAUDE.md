@@ -140,6 +140,11 @@ touched, with no retrofit sweep.
   the repro to its parent or the maintainer.
 - Data loss or a security failure is escalated to the maintainer at once, a
   security failure privately (`SECURITY.md`).
+- **The conductor checks for private security reports at its start and
+  daily** (`gh api repos/Pseudogiant-xr/Pseudolife-MCP/security-advisories
+  --jq '.[] | select(.state == "triage")'`) and tells the maintainer about
+  each new one at once, because `SECURITY.md` promises an acknowledgement
+  within 7 days.
 - **A guard never blocks a legitimate path:** it decides on the exact
   signal it documents, never a text match something else can produce, and
   its tests include the near-miss legitimate call.

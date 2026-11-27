@@ -35,6 +35,21 @@ pub(crate) fn log_step(text: &str) {
         }
     });
 }
+/// Appends `text` to the unattended log from outside `run_unattended` (the
+/// full hand-off runs before it opens the log); best effort.
+pub(crate) fn log_line(text: &str) {
+    let path = seams::data_dir().join(LOG_NAME);
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(mut file) = OpenOptions::new().append(true).create(true).open(&path) {
+        let _ = writeln!(
+            file,
+            "[{}] {text}",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+        );
+    }
+}
 struct LogGuard;
 impl Drop for LogGuard {
     fn drop(&mut self) {
@@ -422,6 +437,19 @@ fn run_inner(
             update.step(format!("held off: {error}"));
             return Ok(4);
         }
+        // A Python host already at the newest release still has to move: the
+        // Python daemon is retired, so the run holds for an attended update
+        // instead of reporting nothing to do (an unreadable host is left out).
+        let labels = super::engine::host_labels(update, super::DAEMON_CONTAINER);
+        if labels.as_object().is_some_and(|map| !map.is_empty())
+            && labels[super::engine::ENGINE_LABEL].as_str() != Some("rust")
+        {
+            return Ok(attended_hold(
+                update,
+                Some(&latest),
+                super::release::PYTHON_RETIRED_HOLD,
+            ));
+        }
         update.step(format!(
             "current: {current} is the newest release; nothing to do"
         ));
@@ -458,7 +486,8 @@ fn run_inner(
             return Ok(4);
         }
     };
-    let _lock = match super::UpdateLock::acquire() {
+    // A full hand-off child borrows the lock of the updater that started it.
+    let _lock = match super::UpdateLock::acquire_borrowing(update.o.handoff.from.as_deref()) {
         Ok(lock) => lock,
         Err(error) if busy(&error) => {
             let text = format!(
@@ -640,7 +669,7 @@ fn run_clients(update: &mut Update) -> Result<u8> {
         ));
         return Ok(3);
     }
-    let _lock = match super::UpdateLock::acquire() {
+    let _lock = match super::UpdateLock::acquire_borrowing(update.o.handoff.from.as_deref()) {
         Ok(lock) => lock,
         Err(error) if busy(&error) => {
             update.step(format!(

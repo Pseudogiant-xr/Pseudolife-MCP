@@ -30,6 +30,16 @@ in line as they are touched, with no retrofit sweep.
   `--test-login` / `-TestLogin` and checkout-mode update, and checkout
   builds only by checkout mode.
 
+From 0.26.0, a release-mode `update` on a Docker host whose target is newer
+than the running updater hands the whole update to the target release's own
+updater, before any daemon step (the full hand-off, `full-update-v1`,
+`rust/shim/src/cli/update/full_handoff.rs`; user-facing description in
+`docs/guide/configuration.md` "A newer release runs its own update"). A
+change to how `update` decides therefore reaches a user on the update *to*
+the release that carries it, not one update later. It reaches an updater
+older than 0.26.0 only after that host's client has moved
+(`update --clients-only`).
+
 The native installers finish the remaining work and exit 5 when setup fails
 for a requested client's connection, plugin, or hooks, with one final line
 per failure and warning-only guidance for hooks awaiting approval.

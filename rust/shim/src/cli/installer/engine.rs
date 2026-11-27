@@ -273,7 +273,7 @@ fn checkout_version(repo: &Path) -> Result<String> {
         // A defaulted install falls back to Python on either alone, and the
         // fallback line keeps the text before the first ';' (cause()).
         Some(version) => Err(unavailable(format!(
-            "Cannot read a release version from this checkout's {RELEASE_MANIFEST} (its [package] version is {version}, not a plain release); check out a release tag (git checkout v<version>) and rerun, or rerun with --engine python. Nothing was started."
+            "Cannot read a release version from this checkout's {RELEASE_MANIFEST} (its [package] version is {version}, not a plain release); check out a release tag (git checkout v<version>) and rerun. Nothing was started."
         ))),
         // No plain version line at all: the file needs repair, which a
         // checkout of a release tag would not do (it refuses the local
@@ -387,7 +387,7 @@ fn provision(image: &str) -> Result<()> {
     let pulled = docker(&["pull", image], false, 7200).is_ok_and(|ran| ran.code == 0);
     if !pulled {
         return Err(unavailable(format!(
-            "Cannot pull {image}: this release may not publish a Rust daemon image. Rerun with --engine python (-Engine python) to install the Python daemon. Nothing was started."
+            "Cannot pull {image}: check the network and registry access, or check out a release that publishes its Rust daemon image, then rerun. Nothing was started."
         )));
     }
     let volume = format!("{PROJECT}_{MODELS_VOLUME}");
@@ -432,7 +432,7 @@ fn provision(image: &str) -> Result<()> {
     ];
     if docker(&args, false, 3600)?.code != 0 {
         return Err(unavailable(
-            "Cannot provision the Rust daemon's models; check network access and disk space, then rerun (or rerun with --engine python). Nothing was started.",
+            "Cannot provision the Rust daemon's models; check network access and disk space, then rerun. Nothing was started.",
         ));
     }
     Ok(())
@@ -752,7 +752,7 @@ fn accept(url: &str) -> Result<&'static str> {
     }
     if truthy(&state["counters_import_required"]) {
         return Err(refusal(format!(
-            "The Rust daemon reports counters still to import from memory_state/weights.pt; install with --engine python, then switch with pseudolife-mcp update --engine rust.{unrecorded}"
+            "The Rust daemon reports counters still to import from memory_state/weights.pt, which only pseudolife-mcp update imports: remove this unfinished daemon (docker rm -f pseudolife-mcp-daemon; the bank's volumes stay) and rerun the installer, which brings the bank up as it is and moves it to Rust through that update.{unrecorded}"
         )));
     }
     let schema = image_schema(service["image"].as_str().unwrap_or_default());
@@ -768,7 +768,7 @@ fn accept(url: &str) -> Result<&'static str> {
         // update verifies a Rust daemon with an authenticated read: without a
         // bearer the host could never be updated.
         return Err(refusal(format!(
-            "The Rust daemon runs without a bearer token, so pseudolife-mcp update could not verify it; rerun the installer without --no-token (its token step names any failure), or use --engine python.{unrecorded}"
+            "The Rust daemon runs without a bearer token, so pseudolife-mcp update could not verify it; rerun the installer without --no-token (its token step names any failure).{unrecorded}"
         )));
     }
     if !crate::cli::update::seams::authenticated_read(url, &token) {
@@ -1103,11 +1103,9 @@ mod tests {
             cause(&refused.message),
             "Cannot read a release version from this checkout's rust/shim/Cargo.toml (its [package] version is 0.26.0.dev1, not a plain release)"
         );
-        assert!(
-            refused
-                .message
-                .contains("check out a release tag (git checkout v<version>) and rerun, or rerun with --engine python")
-        );
+        assert!(refused.message.contains(
+            "check out a release tag (git checkout v<version>) and rerun. Nothing was started."
+        ));
         // No plain version at all (a deleted line, version.workspace): the
         // message names the line it needs and the repair, not a release tag
         // (a checkout of a tag would refuse the local change or keep it).

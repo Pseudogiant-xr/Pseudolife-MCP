@@ -138,9 +138,13 @@ async fn test_no_spawn_env_starts_without_the_daemon_and_names_the_docker_remedy
     let notes = control.notes.join("\n");
     assert!(
         notes.contains("PSEUDOLIFE_MCP_NO_SPAWN")
-            && notes.contains("docker compose")
-            && notes.contains("retries")
+            && notes.contains("docker start pseudolife-mcp-postgres pseudolife-mcp-daemon")
+            && notes.contains("retries"),
+        "{notes}"
     );
+    // `docker compose -f ops/docker-compose.yml up -d` recreated the daemon
+    // from the base file's image, so the remedy no longer names it.
+    assert!(!notes.contains("docker compose"), "{notes}");
     assert_eq!(control.now, Duration::from_secs(5));
     assert_eq!(control.spawn_count, 0);
 }

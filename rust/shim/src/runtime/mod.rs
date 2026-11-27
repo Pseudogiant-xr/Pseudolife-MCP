@@ -17,7 +17,7 @@ use std::{
 
 pub use cli::run;
 pub(crate) use install::{available_space, https_only_for, rename_retry};
-pub use install::{install_archive, install_binary, install_source, target_triple};
+pub use install::{install_archive, install_binary, install_source, stage_release, target_triple};
 pub use launch::maybe_launch;
 #[cfg(windows)]
 pub(crate) use launch::windows_job;

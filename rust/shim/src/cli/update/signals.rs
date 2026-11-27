@@ -19,12 +19,24 @@ static COUNT: AtomicUsize = AtomicUsize::new(0);
 static CANCELLED: AtomicBool = AtomicBool::new(false);
 static SUSPEND: AtomicBool = AtomicBool::new(false);
 static STOPPED_NANOS: AtomicU64 = AtomicU64::new(0);
+/// The latest cancelling signal came from a process (`kill`), not from the
+/// kernel on the terminal's behalf (Ctrl-C, Ctrl-\, a hang-up), which
+/// reaches the whole foreground process group by itself.
+static FROM_PROCESS: AtomicBool = AtomicBool::new(false);
 thread_local! { static DEPTH: Cell<usize> = const { Cell::new(0) }; }
 
-extern "C" fn receive(signal: libc::c_int) {
+extern "C" fn receive(signal: libc::c_int, info: *mut libc::siginfo_t, _: *mut libc::c_void) {
     if signal == libc::SIGTSTP {
         SUSPEND.store(true, Ordering::Relaxed);
     } else {
+        // SAFETY: the kernel passes a valid siginfo with SA_SIGINFO; reading
+        // the sender's pid is async-signal-safe.
+        let sender = if info.is_null() {
+            0
+        } else {
+            unsafe { (*info).si_pid() }
+        };
+        FROM_PROCESS.store(sender != 0, Ordering::Relaxed);
         let _ = RECEIVED.compare_exchange(0, signal, Ordering::Relaxed, Ordering::Relaxed);
         CANCELLED.store(true, Ordering::Relaxed);
         LATEST.store(signal, Ordering::Relaxed);
@@ -77,6 +89,7 @@ impl Guard {
                 }
                 let mut action: libc::sigaction = std::mem::zeroed();
                 action.sa_sigaction = receive as *const () as libc::sighandler_t;
+                action.sa_flags = libc::SA_SIGINFO;
                 libc::sigemptyset(&mut action.sa_mask);
                 if libc::sigaction(signal, &action, std::ptr::null_mut()) != 0 {
                     return Err(std::io::Error::last_os_error());
@@ -94,6 +107,16 @@ pub(super) fn cancelled() -> bool {
 
 pub(super) fn received() -> i32 {
     RECEIVED.load(Ordering::Relaxed)
+}
+
+/// Clears the pending cancelling signal and returns it, with whether a
+/// process sent the latest one: a caller that let a child it waits for
+/// handle the signal does not re-raise it at the end of its scope.
+pub(super) fn take() -> (i32, bool) {
+    (
+        RECEIVED.swap(0, Ordering::Relaxed),
+        FROM_PROCESS.load(Ordering::Relaxed),
+    )
 }
 
 pub(super) fn owns_scope() -> bool {
@@ -283,10 +306,10 @@ mod tests {
         let _command = COMMAND.lock().unwrap_or_else(|e| e.into_inner());
         RECEIVED.store(0, Ordering::Relaxed);
         COUNT.store(0, Ordering::Relaxed);
-        receive(libc::SIGINT); // Interrupt shadow startup.
+        receive(libc::SIGINT, std::ptr::null_mut(), std::ptr::null_mut()); // Interrupt shadow startup.
         let recovery = CleanupSignal::new();
         assert_eq!(received(), 0);
-        receive(libc::SIGINT); // One more Ctrl+C while removing the shadow.
+        receive(libc::SIGINT, std::ptr::null_mut(), std::ptr::null_mut()); // One more Ctrl+C while removing the shadow.
         let mut child = RecordingChild::default();
         tokio::runtime::Builder::new_current_thread()
             .enable_time()
