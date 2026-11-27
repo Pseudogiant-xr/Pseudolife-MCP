@@ -2145,6 +2145,15 @@ mod tests {
             write.await.unwrap().unwrap();
         }
         embedded.expect("a write waited for the write lock before embedding its text");
+        // A lock holder's embedding never queues on the write embedding gate.
+        let _gate = crate::fact_set::admit_write_embed().await;
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            crate::fact_set::embed_held(&ready, "A lock holder's text.".into()),
+        )
+        .await
+        .expect("embed_held waited for the write embedding gate")
+        .unwrap();
     }
 
     #[tokio::test]
