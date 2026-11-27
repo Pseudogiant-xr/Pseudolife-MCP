@@ -166,6 +166,11 @@ fn verify_process_evidence(rows: &mut Vec<Process>) -> Result<()> {
     append_macos_process_images(rows, &output.stdout)
 }
 
+/// The runtime's file name as macOS ps prints it. The parser is compiled
+/// on every host for its tests, and on Windows [`BINARY`] carries `.exe`.
+#[cfg(any(target_os = "macos", test))]
+const MACOS_BINARY: &str = "pseudolife-mcp";
+
 #[cfg(any(target_os = "macos", test))]
 fn append_macos_process_images(rows: &mut Vec<Process>, bytes: &[u8]) -> Result<()> {
     for line in std::str::from_utf8(bytes)
@@ -200,7 +205,7 @@ fn append_macos_process_images(rows: &mut Vec<Process>, bytes: &[u8]) -> Result<
             PathBuf::from(image)
         } else if Path::new(image)
             .file_name()
-            .is_some_and(|name| name == BINARY)
+            .is_some_and(|name| name == MACOS_BINARY)
         {
             return Err(
                 "a process names the native runtime without its path; no runtime was removed"

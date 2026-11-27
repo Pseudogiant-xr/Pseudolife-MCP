@@ -315,6 +315,13 @@ fn a_malformed_macos_process_row_still_blocks_pruning() {
     }
 }
 
+/// The macOS parser's runtime name is the one a unix build installs.
+#[cfg(unix)]
+#[test]
+fn the_macos_runtime_name_is_the_unix_binary() {
+    assert_eq!(MACOS_BINARY, BINARY);
+}
+
 /// A runtime that runs without its usage lock (a user's symlink to it found
 /// through PATH, another data home) shows as the runtime's bare file name, so
 /// that name, and only that name, still removes nothing.
