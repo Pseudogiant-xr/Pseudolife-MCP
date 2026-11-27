@@ -19,8 +19,16 @@ pub const DOCKER_INSTALL: &str =
 /// configuration guide's "Move a lite bank to Docker", which also names the
 /// pip release that still opens the bank.
 pub const MOVE_GUIDE: &str = "https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/master/docs/guide/configuration.md#move-a-lite-bank-to-docker";
-/// How a stopped Docker-tier daemon is started.
-pub const DOCKER_START: &str = "docker compose -f ops/docker-compose.yml up -d";
+/// How a stopped Docker-tier daemon is started: its containers as they are,
+/// on the image they already run. A Compose `up` from the base file would
+/// recreate the daemon on that file's image, the retired Python daemon.
+macro_rules! docker_start {
+    () => {
+        "docker start pseudolife-mcp-postgres pseudolife-mcp-daemon"
+    };
+}
+pub(crate) use docker_start;
+pub const DOCKER_START: &str = docker_start!();
 
 /// Whether `data_dir` holds a lite-tier bank.
 pub fn is_lite_bank(data_dir: &Path) -> bool {

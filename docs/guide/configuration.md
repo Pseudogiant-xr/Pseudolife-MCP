@@ -40,8 +40,10 @@ state volume (compose sets `PSEUDOLIFE_MCP_DATA_DIR=/data`; `docker exec
 pseudolife-mcp-daemon cat /data/config.yaml` shows it), read at startup, so
 a hand-edited value applies after the daemon restarts (`docker restart
 pseudolife-mcp-daemon`), while a `PSEUDOLIFE_MCP_TOKENS` change is an
-`ops/.env` change and needs the container recreated (`ops/update.*`, or
-`docker compose -f ops/docker-compose.yml up -d --no-deps pseudolife-daemon`).
+`ops/.env` change and needs the container recreated with the new bearer
+settings through update's explicit handover ([Changing daemon bearer
+settings](#changing-daemon-bearer-settings) gives the release and checkout
+commands).
 
 An `ops/.env` copied from a Windows host carries CRLF line endings. Compose
 reads such a file fine, but a value the shell installer read from it ended
@@ -3822,8 +3824,9 @@ says why in one line in each of these cases:
   one next step is to move the bank to the Docker tier with
   [Move a lite bank to Docker](#move-a-lite-bank-to-docker).
 - `pseudolife-mcp serve`: it does not run the memory daemon, which is the
-  Docker tier's `pseudolife-daemon`; start that with `docker compose -f
-  ops/docker-compose.yml up -d`, or install the Docker tier first.
+  Docker tier's `pseudolife-daemon`; start that with `docker start
+  pseudolife-mcp-postgres pseudolife-mcp-daemon`, or install the Docker tier
+  first.
 - `pseudolife-mcp embedded`: retired with file mode; use the Docker tier.
 - Starting a local daemon itself: the shim starts one only from
   `PSEUDOLIFE_MCP_SERVE_COMMAND`, a JSON argv array (for example
