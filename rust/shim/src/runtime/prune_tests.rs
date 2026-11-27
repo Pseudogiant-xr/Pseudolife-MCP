@@ -275,17 +275,42 @@ fn macos_login_shell_comm_allows_idle_pruning_and_retains_direct_launches() {
 }
 
 #[test]
-fn macos_readable_ambiguous_comm_still_blocks_pruning() {
-    for image in [
-        "pseudolife-mcp",
-        "relative/pseudolife-mcp",
-        "-zsh/unknown",
-        "-unknown",
-    ] {
-        let line = format!("123 1 {image}\n");
+fn a_macos_comm_that_is_not_an_image_path_leaves_removal_to_the_usage_lock() {
+    let f = Fixture::new();
+    let old = f.install("1.0.0");
+    f.install("1.0.1");
+    let mut evidence = f.windows_evidence();
+    // Rows a hosted macos-15 runner printed: a daemon, a driver with spaces,
+    // PATH-started tools of this account and a zombie.
+    append_macos_process_images(
+        &mut evidence.processes,
+        b"   93     1 endpointsecurityd\n  248     1 Core Audio Driver (NullAudio.driver)\n  929   927 sudo\n 1288  1281 awk\n 1292  1290 <defunct>\n 1300     1 pseudolife-mcp\n 1301     1 relative/pseudolife-mcp\n",
+    )
+    .unwrap();
+    for pid in [93, 248, 929, 1288, 1292, 1300, 1301] {
         assert!(
-            append_macos_process_images(&mut vec![], line.as_bytes()).is_err(),
-            "{image}"
+            evidence
+                .processes
+                .iter()
+                .any(|p| p.0 == pid && p.2.as_os_str().is_empty()),
+            "{pid}: {:?}",
+            evidence.processes
+        );
+    }
+    let pin = launch::pin(&old).unwrap();
+    let report = f.prune(Ok(evidence.clone()));
+    assert_eq!(report["removed"], json!([]), "{report}");
+    assert_eq!(report["held"][0]["path"], json!(old.path), "{report}");
+    drop(pin);
+    assert_eq!(f.prune(Ok(evidence))["removed"], json!([old.path]));
+}
+
+#[test]
+fn a_malformed_macos_process_row_still_blocks_pruning() {
+    for line in ["", "x 1 /bin/zsh", "123 /bin/zsh", "123 y /bin/zsh"] {
+        assert!(
+            append_macos_process_images(&mut vec![], format!("{line}\n").as_bytes()).is_err(),
+            "{line:?}"
         );
     }
     let mut rows = vec![];
