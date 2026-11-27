@@ -411,11 +411,21 @@ impl Nondumpable {
                 .unwrap(),
         );
         let stdout = child.0.stdout.take().unwrap();
-        let ready = io::BufReader::new(stdout)
-            .lines()
-            .map_while(std::result::Result::ok)
-            .any(|line| line == NONDUMPABLE_READY);
-        assert!(ready, "the helper exited before it became non-dumpable");
+        // libtest prints the helper's `test <name> ... ` on the marker's own
+        // line, so the marker is found within a line; a reader thread keeps a
+        // helper that never prints it from hanging the test.
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let ready = io::BufReader::new(stdout)
+                .lines()
+                .map_while(std::result::Result::ok)
+                .any(|line| line.contains(NONDUMPABLE_READY));
+            let _ = ready_tx.send(ready);
+        });
+        let ready = ready_rx
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .unwrap_or(false);
+        assert!(ready, "the helper never said it became non-dumpable");
         let exe = Path::new("/proc").join(child.pid().to_string()).join("exe");
         match fs::read_link(&exe) {
             Err(e) if e.kind() == io::ErrorKind::PermissionDenied => Some(child),
