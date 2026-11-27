@@ -263,12 +263,13 @@ fn fifo_replacement_is_interruptible_and_listener_permissions_override_umask() {
         .as_ref()
         .map(|path| fs::metadata(path).unwrap().permissions().mode() & 0o777);
     fs::remove_file(&digest).unwrap();
-    rustix::fs::mkfifoat(
-        rustix::fs::CWD,
-        &digest,
-        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
-    )
-    .unwrap();
+    // The mkfifo command: rustix has no mkfifoat on Apple targets.
+    let made = std::process::Command::new("mkfifo")
+        .args(["-m", "600"])
+        .arg(&digest)
+        .status()
+        .unwrap();
+    assert!(made.success(), "mkfifo {}: {made}", digest.display());
     // Linux: interrupt only once the waiter holds the FIFO for reading, past
     // its interrupt guard (a nonblocking writer can open a FIFO only while a
     // reader has it open); its read polls the interrupt flag, so the held

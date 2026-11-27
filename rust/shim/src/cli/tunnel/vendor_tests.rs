@@ -911,8 +911,7 @@ fn a_fifo_in_the_installed_runtime_is_refused_without_blocking() {
         let path = folder.join("LICENSE");
         fs::remove_file(&path).unwrap();
         // The mkfifo command, not rustix: rustix has neither mknodat nor
-        // mkfifoat on Apple targets, so this crate's lib tests did not
-        // compile on macOS (hosted macos-15, 27 November 2026).
+        // mkfifoat on Apple targets.
         let made = std::process::Command::new("mkfifo")
             .args(["-m", "600"])
             .arg(&path)
