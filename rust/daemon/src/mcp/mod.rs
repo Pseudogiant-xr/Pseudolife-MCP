@@ -24,9 +24,9 @@ use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::Response;
 use serde_json::{Map, Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tiers::{Overrides, Tier};
 use tokio::sync::{mpsc, watch};
 
@@ -36,6 +36,15 @@ const HANDSHAKE_VERSIONS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18", 
 const LATEST_HANDSHAKE: &str = "2025-11-25";
 /// sse-starlette's keep-alive comment interval.
 const PING_EVERY: Duration = Duration::from_secs(15);
+/// How long a session with no request and no open event stream is kept,
+/// and how many sessions one principal keeps at most (its own least
+/// recently used go first, so no principal can push out another's). Not
+/// measured: the TTL matches `tiers::OVERRIDE_TTL`; an entry is a few
+/// hundred bytes, and principals come only from the daemon's own token
+/// configuration, so the total stays a few MB per principal however many
+/// clients never send DELETE.
+const SESSION_IDLE_TTL: Duration = Duration::from_secs(12 * 3600);
+const SESSION_CAP: usize = 1_000;
 /// `transport_security.DEFAULT_MAX_REQUEST_BODY_SIZE`, enforced by the SDK's
 /// `RequestBodyLimitMiddleware` around the whole MCP app.
 pub(crate) const BODY_LIMIT: usize = 4 * 1024 * 1024;
@@ -59,10 +68,33 @@ pub struct McpState {
 /// One registered transport. `ready` is the SDK runner's initialization
 /// gate: until an `initialize` succeeds or `notifications/initialized`
 /// arrives, every request but `ping` is refused.
-#[derive(Default)]
 struct Entry {
     stream: Option<StandaloneStream>,
     ready: bool,
+    /// The principal whose request opened the session: a request by any
+    /// other principal finds no such session.
+    principal: String,
+    last_used: Instant,
+}
+
+impl Entry {
+    fn new(principal: &str, now: Instant) -> Self {
+        Self {
+            stream: None,
+            ready: false,
+            principal: principal.to_owned(),
+            last_used: now,
+        }
+    }
+
+    /// Idle past the TTL with no open event stream to keep it.
+    fn expired(&self, now: Instant, ttl: Duration) -> bool {
+        now.duration_since(self.last_used) >= ttl
+            && self
+                .stream
+                .as_ref()
+                .is_none_or(|stream| stream.tx.is_closed())
+    }
 }
 
 struct StandaloneStream {
@@ -72,10 +104,69 @@ struct StandaloneStream {
 }
 
 /// mcp 2.2 keeps no memory of ended sessions: a DELETEd or discarded id is
-/// simply unknown (`_discard_session`).
-#[derive(Default)]
+/// simply unknown (`_discard_session`). So is one another principal opened,
+/// one idle past `idle_ttl`, and a principal's least recently used past
+/// `cap` of its own.
 struct Sessions {
     live: HashMap<String, Entry>,
+    idle_ttl: Duration,
+    cap: usize,
+}
+
+impl Sessions {
+    fn new(idle_ttl: Duration, cap: usize) -> Self {
+        Self {
+            live: HashMap::new(),
+            idle_ttl,
+            cap,
+        }
+    }
+
+    /// Keep `admitted`, a session its opening request just established,
+    /// within its principal's cap: expired sessions go, then that
+    /// principal's other sessions, idle ones first (no open event stream,
+    /// no request in flight), least recently used first. Returns the ids
+    /// dropped, whose request registrations are forgotten.
+    fn make_room(&mut self, admitted: &str, now: Instant, busy: &HashSet<String>) -> Vec<String> {
+        let Some(principal) = self.live.get(admitted).map(|entry| entry.principal.clone()) else {
+            return Vec::new();
+        };
+        let mut dropped = Vec::new();
+        if self.live.len() > self.cap.min(256) {
+            let ttl = self.idle_ttl;
+            self.live.retain(|sid, entry| {
+                let keep = sid == admitted || !entry.expired(now, ttl);
+                if !keep {
+                    dropped.push(sid.clone());
+                }
+                keep
+            });
+        }
+        let mut others: Vec<((bool, bool, Instant), String)> = self
+            .live
+            .iter()
+            .filter(|(sid, entry)| entry.principal == principal && sid.as_str() != admitted)
+            .map(|(sid, entry)| {
+                let streaming = entry
+                    .stream
+                    .as_ref()
+                    .is_some_and(|stream| !stream.tx.is_closed());
+                (
+                    (streaming, busy.contains(sid), entry.last_used),
+                    sid.clone(),
+                )
+            })
+            .collect();
+        if others.len() >= self.cap {
+            others.sort();
+            let excess = others.len() + 1 - self.cap;
+            for (_, sid) in others.into_iter().take(excess) {
+                self.live.remove(&sid);
+                dropped.push(sid);
+            }
+        }
+        dropped
+    }
 }
 
 enum Lookup {
@@ -94,8 +185,13 @@ struct Opening<'a> {
 }
 
 impl Opening<'_> {
+    /// Only an established session takes a place under its principal's cap,
+    /// so a refused opening never displaces another session.
     fn settle(mut self, status: StatusCode) {
         self.established = status.as_u16() < 400;
+        if self.established {
+            self.state.admit(&self.sid, Instant::now());
+        }
     }
 }
 
@@ -125,7 +221,7 @@ impl McpState {
             tier_map,
             overrides: Overrides::new(tiers::OVERRIDE_TTL),
             auth_configured,
-            sessions: Mutex::new(Sessions::default()),
+            sessions: Mutex::new(Sessions::new(SESSION_IDLE_TTL, SESSION_CAP)),
             requests: Arc::new(cancellation::Registry::default()),
             modern: Arc::new(modern::Subscriptions::default()),
         }
@@ -162,20 +258,74 @@ impl McpState {
         )
     }
 
-    fn lookup(&self, sid: &str) -> Lookup {
-        let s = self.sessions.lock().expect("sessions lock");
-        if s.live.contains_key(sid) {
-            Lookup::Live
-        } else {
-            Lookup::Unknown
+    /// A live session `principal` opened, touched as used. Another
+    /// principal's session is unknown to this one, and an expired one is
+    /// forgotten.
+    fn lookup(&self, sid: &str, principal: &str) -> Lookup {
+        self.lookup_at(sid, principal, Instant::now())
+    }
+
+    fn lookup_at(&self, sid: &str, principal: &str, now: Instant) -> Lookup {
+        let mut s = self.sessions.lock().expect("sessions lock");
+        let ttl = s.idle_ttl;
+        match s.live.get_mut(sid) {
+            Some(entry) if entry.principal != principal => Lookup::Unknown,
+            Some(entry) if entry.expired(now, ttl) => {
+                s.live.remove(sid);
+                drop(s);
+                self.requests.forget(sid);
+                Lookup::Unknown
+            }
+            Some(entry) => {
+                // Never backwards: a request that sampled the clock earlier
+                // may take the lock later.
+                entry.last_used = entry.last_used.max(now);
+                Lookup::Live
+            }
+            None => Lookup::Unknown,
         }
     }
 
     /// The SDK manager registers a transport for every request that arrives
     /// without a session id, whatever happens to that request afterwards.
-    fn register(&self, sid: &str) {
+    fn register(&self, sid: &str, principal: &str) {
+        self.register_at(sid, principal, Instant::now());
+    }
+
+    fn register_at(&self, sid: &str, principal: &str, now: Instant) {
         let mut s = self.sessions.lock().expect("sessions lock");
-        s.live.entry(sid.to_string()).or_default();
+        s.live
+            .entry(sid.to_string())
+            .or_insert_with(|| Entry::new(principal, now));
+    }
+
+    /// An opening request established `sid`: its principal's cap is kept by
+    /// dropping that principal's other sessions (see `Sessions::make_room`).
+    fn admit(&self, sid: &str, now: Instant) {
+        let busy = self.requests.sessions();
+        let dropped = self
+            .sessions
+            .lock()
+            .expect("sessions lock")
+            .make_room(sid, now, &busy);
+        for sid in dropped {
+            self.requests.forget(&sid);
+        }
+    }
+
+    /// A standalone stream ended: the session counts as used now, so a
+    /// client that only listened can reconnect within the idle TTL.
+    fn touch(&self, sid: &str) {
+        let now = Instant::now();
+        if let Some(entry) = self
+            .sessions
+            .lock()
+            .expect("sessions lock")
+            .live
+            .get_mut(sid)
+        {
+            entry.last_used = entry.last_used.max(now);
+        }
     }
 
     /// Opens the initialization gate. A session forgotten meanwhile (a
@@ -413,7 +563,7 @@ pub async fn handle(
 
     let supplied = latin1(&headers, "mcp-session-id");
     let (sid, known) = match supplied {
-        Some(s) => match state.lookup(&s) {
+        Some(s) => match state.lookup(&s, principal) {
             Lookup::Live => (s, true),
             Lookup::Unknown => {
                 return rpc_http_error(404, INVALID_REQUEST, "Session not found", None);
@@ -423,7 +573,7 @@ pub async fn handle(
             // A new transport under a fresh id, registered before its first
             // request is even checked (the manager's new-session path).
             let sid = uuid::Uuid::new_v4().simple().to_string();
-            state.register(&sid);
+            state.register(&sid, principal);
             (sid, false)
         }
     };
@@ -438,7 +588,7 @@ pub async fn handle(
     // A DELETE racing this request forgot the session after its lookup: the
     // transport refuses it after security and before the method
     // (streamable_http.py:506-516).
-    if known && matches!(state.lookup(&sid), Lookup::Unknown) {
+    if known && matches!(state.lookup(&sid, principal), Lookup::Unknown) {
         return rpc_http_error(
             404,
             INVALID_REQUEST,
@@ -448,7 +598,7 @@ pub async fn handle(
     }
     let response = match method {
         Method::POST => post(app, principal, &sid, known, headers, body).await,
-        Method::GET => get(state, &sid, known, &headers),
+        Method::GET => get(app, &sid, known, &headers),
         Method::DELETE if !known => rpc_http_error(
             400,
             INVALID_REQUEST,
@@ -474,7 +624,8 @@ pub async fn handle(
     response
 }
 
-fn get(state: &McpState, sid: &str, known: bool, headers: &HeaderMap) -> Response {
+fn get(app: &Arc<crate::http::App>, sid: &str, known: bool, headers: &HeaderMap) -> Response {
+    let state = &app.mcp;
     if !accepts(headers).1 {
         return rpc_http_error(
             406,
@@ -520,6 +671,7 @@ fn get(state: &McpState, sid: &str, known: bool, headers: &HeaderMap) -> Respons
         }
         entry.stream = Some(StandaloneStream { tx, cancel });
     }
+    let (ended, ended_sid) = (app.clone(), sid.to_owned());
     let stream = async_stream(move |yield_tx| async move {
         let mut ping =
             tokio::time::interval_at(tokio::time::Instant::now() + PING_EVERY, PING_EVERY);
@@ -540,6 +692,7 @@ fn get(state: &McpState, sid: &str, known: bool, headers: &HeaderMap) -> Respons
                 }
             } => {},
         }
+        ended.mcp.touch(&ended_sid);
     });
     let mut r = Response::new(Body::from_stream(stream));
     sse_headers(&mut r, sid);
@@ -1109,7 +1262,7 @@ mod sessions {
 
     async fn ping_message(body: &str) -> Response {
         let app = app();
-        app.mcp.register("s");
+        app.mcp.register("s", "caller");
         app.mcp.mark_ready("s");
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -1207,7 +1360,7 @@ mod sessions {
     #[tokio::test]
     async fn untrusted_request_state_refuses_before_tier_change() {
         let app = app();
-        app.mcp.register("s");
+        app.mcp.register("s", "caller");
         app.mcp.mark_ready("s");
         let params = json!({"name":"memory_toolset", "arguments":{"action":"expand"},
             "requestState":"not-a-sealed-token"});
@@ -1235,7 +1388,7 @@ mod sessions {
     #[tokio::test]
     async fn malformed_initialized_notification_keeps_gate_closed() {
         let app = app();
-        app.mcp.register("s");
+        app.mcp.register("s", "caller");
         let mut headers = HeaderMap::new();
         headers.insert(
             "accept",
@@ -1261,7 +1414,7 @@ mod sessions {
     async fn overflow_json_floats_reach_valid_toolset_dispatch() {
         for literal in ["1e400", "-1e400", "9e999", "-9e999"] {
             let app = app();
-            app.mcp.register("s");
+            app.mcp.register("s", "caller");
             app.mcp.mark_ready("s");
             let text = format!(
                 r#"{{"name":"memory_toolset","arguments":{{"action":"expand"}},"inputResponses":{{"k":{{"action":"accept","content":{{"x":{literal}}}}}}}}}"#
@@ -1290,7 +1443,7 @@ mod sessions {
 
     async fn assert_sdk_ttl_rule(ttl: String, accepted: bool) {
         let app = app();
-        app.mcp.register("s");
+        app.mcp.register("s", "caller");
         app.mcp.mark_ready("s");
         let params = json!({"name":"memory_toolset", "arguments":{"action":"expand"},
                 "task":{"ttl":ttl}});
@@ -1332,7 +1485,7 @@ mod sessions {
     #[tokio::test]
     async fn malformed_task_refuses_before_tier_change() {
         let app = app();
-        app.mcp.register("s");
+        app.mcp.register("s", "caller");
         app.mcp.mark_ready("s");
         let params = json!({"name":"memory_toolset", "arguments":{"action":"expand"},
             "task":{"ttl":"bad"}});
@@ -1363,7 +1516,7 @@ mod sessions {
             json!({"name":"fixture","version":"1","icons":"bad"}),
         ] {
             let app = app();
-            app.mcp.register("s");
+            app.mcp.register("s", "caller");
             let params =
                 json!({"protocolVersion":"2025-11-25", "capabilities":{},"clientInfo":info});
             let value: Value = serde_json::from_str(
@@ -1421,7 +1574,7 @@ mod sessions {
                 ),
             ] {
                 let app = app();
-                app.mcp.register("s");
+                app.mcp.register("s", "caller");
                 if ready {
                     app.mcp.mark_ready("s");
                 }
@@ -1456,7 +1609,7 @@ mod sessions {
             json!(-9223372036854775808.0),
         ] {
             let app = app();
-            app.mcp.register("s");
+            app.mcp.register("s", "caller");
             app.mcp.mark_ready("s");
             let params = json!({"name":"memory_toolset", "arguments":{"action":"expand"},
                 "_meta":{"progressToken":token}});
@@ -1512,7 +1665,7 @@ mod sessions {
             ),
         ] {
             let app = app();
-            app.mcp.register("s");
+            app.mcp.register("s", "caller");
             let params = json!({"protocolVersion": "2025-11-25", "capabilities": caps,
                 "clientInfo": {"name": "fixture", "version": "1"}});
             let init: Value = serde_json::from_str(
@@ -1550,10 +1703,10 @@ mod sessions {
     async fn stalled_get_notifications_are_bounded_and_cancelled() {
         for terminate in [false, true] {
             let app = app();
-            app.mcp.register("s");
+            app.mcp.register("s", "caller");
             let mut headers = HeaderMap::new();
             headers.insert("accept", HeaderValue::from_static("text/event-stream"));
-            let response = get(&app.mcp, "s", true, &headers);
+            let response = get(&app, "s", true, &headers);
             assert_eq!(response.status(), StatusCode::OK);
             let worker_app = app.clone();
             let mut worker = tokio::spawn(async move {
@@ -1597,13 +1750,13 @@ mod sessions {
     #[test]
     fn a_forgotten_session_is_not_reopened() {
         let state = McpState::new(Tier::Core, HashMap::new(), true);
-        state.register("s1");
-        assert!(matches!(state.lookup("s1"), Lookup::Live));
+        state.register("s1", "caller");
+        assert!(matches!(state.lookup("s1", "caller"), Lookup::Live));
         assert!(!state.is_ready("s1"));
         state.forget("s1");
         // An initialize or initialized notification racing the DELETE.
         state.mark_ready("s1");
-        assert!(matches!(state.lookup("s1"), Lookup::Unknown));
+        assert!(matches!(state.lookup("s1", "caller"), Lookup::Unknown));
     }
 
     #[test]
@@ -1615,23 +1768,30 @@ mod sessions {
             ("refused", 400, false),
             ("unacceptable", 406, false),
         ] {
-            state.register(sid);
+            state.register(sid, "caller");
             Opening {
                 state: &state,
                 sid: sid.into(),
                 established: false,
             }
             .settle(StatusCode::from_u16(status).unwrap());
-            assert_eq!(matches!(state.lookup(sid), Lookup::Live), kept, "{sid}");
+            assert_eq!(
+                matches!(state.lookup(sid, "caller"), Lookup::Live),
+                kept,
+                "{sid}"
+            );
         }
         // Cancelled before any status: the guard drops unsettled.
-        state.register("cancelled");
+        state.register("cancelled", "caller");
         drop(Opening {
             state: &state,
             sid: "cancelled".into(),
             established: false,
         });
-        assert!(matches!(state.lookup("cancelled"), Lookup::Unknown));
+        assert!(matches!(
+            state.lookup("cancelled", "caller"),
+            Lookup::Unknown
+        ));
     }
 
     /// What a client gets for an unknown memory_outcome value: the binder's
@@ -1666,6 +1826,191 @@ mod sessions {
                 "{refused:?}"
             );
         }
+    }
+    async fn as_principal(
+        app: &Arc<crate::http::App>,
+        who: &str,
+        method: &str,
+        sid: Option<&str>,
+        body: &'static str,
+    ) -> Response {
+        let mut headers = HeaderMap::new();
+        if let Some(sid) = sid {
+            headers.insert("mcp-session-id", HeaderValue::from_str(sid).unwrap());
+        }
+        headers.insert(
+            "accept",
+            HeaderValue::from_static("application/json, text/event-stream"),
+        );
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
+        let mut body = crate::http::RequestBody::new(Body::from(body));
+        handle(app, who, "/mcp", method, headers, None, &mut body).await
+    }
+
+    const INITIALIZE: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"fixture","version":"1"}}}"#;
+    const PING: &str = r#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#;
+
+    #[tokio::test]
+    async fn a_session_answers_only_the_principal_that_opened_it() {
+        let app = app();
+        let opened = as_principal(&app, "alice", "POST", None, INITIALIZE).await;
+        assert_eq!(opened.status(), 200);
+        let sid = opened.headers()["mcp-session-id"]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        // Another principal holding the id finds no such session, whatever
+        // it tries: a request, the event stream or ending the session.
+        for (method, body) in [("POST", PING), ("GET", ""), ("DELETE", "")] {
+            let refused = as_principal(&app, "bob", method, Some(&sid), body).await;
+            assert_eq!(refused.status(), 404, "{method}");
+        }
+        // The opener's session is untouched and keeps working.
+        let ping = as_principal(&app, "alice", "POST", Some(&sid), PING).await;
+        assert_eq!(ping.status(), 200);
+        let ended = as_principal(&app, "alice", "DELETE", Some(&sid), "").await;
+        assert_eq!(ended.status(), 200);
+        assert!(matches!(app.mcp.lookup(&sid, "alice"), Lookup::Unknown));
+    }
+
+    /// A state whose sessions are capped at `cap` per principal. The tests
+    /// drive the clock forward from a captured start, never backwards,
+    /// which a freshly booted Windows runner could not represent.
+    fn capped(cap: usize) -> McpState {
+        let state = McpState::new(Tier::Core, HashMap::new(), true);
+        *state.sessions.lock().unwrap() = Sessions::new(SESSION_IDLE_TTL, cap);
+        state
+    }
+
+    fn opened(state: &McpState, sid: &str, principal: &str, at: Instant) {
+        state.register_at(sid, principal, at);
+        state.admit(sid, at);
+    }
+
+    fn live(state: &McpState) -> usize {
+        state.sessions.lock().unwrap().live.len()
+    }
+
+    fn open_stream(state: &McpState, sid: &str) -> (mpsc::Receiver<Bytes>, watch::Receiver<()>) {
+        let (tx, rx) = mpsc::channel::<Bytes>(1);
+        let (cancel, cancelled) = watch::channel(());
+        state
+            .sessions
+            .lock()
+            .unwrap()
+            .live
+            .get_mut(sid)
+            .unwrap()
+            .stream = Some(StandaloneStream { tx, cancel });
+        (rx, cancelled)
+    }
+
+    #[test]
+    fn an_idle_session_expires_unless_its_event_stream_is_open() {
+        let state = capped(SESSION_CAP);
+        let start = Instant::now();
+        for sid in ["idle", "streaming", "recent"] {
+            opened(&state, sid, "alice", start);
+        }
+        let _stream = open_stream(&state, "streaming");
+        let later = start + SESSION_IDLE_TTL + Duration::from_secs(1);
+        assert!(matches!(
+            state.lookup_at("idle", "alice", later),
+            Lookup::Unknown
+        ));
+        assert!(!state.sessions.lock().unwrap().live.contains_key("idle"));
+        assert!(matches!(
+            state.lookup_at("streaming", "alice", later),
+            Lookup::Live
+        ));
+        // Just inside the TTL a quiet session is kept.
+        let inside = start + SESSION_IDLE_TTL - Duration::from_secs(60);
+        assert!(matches!(
+            state.lookup_at("recent", "alice", inside),
+            Lookup::Live
+        ));
+        // A use that sampled the clock earlier never moves it backwards.
+        assert!(matches!(
+            state.lookup_at("recent", "alice", start),
+            Lookup::Live
+        ));
+        assert_eq!(
+            state.sessions.lock().unwrap().live["recent"].last_used,
+            inside
+        );
+    }
+
+    #[test]
+    fn past_its_cap_a_principal_loses_its_own_least_recently_used_session() {
+        let state = capped(3);
+        let start = Instant::now();
+        // Bob's session is the oldest of all, and no one else's to evict.
+        opened(&state, "bob", "bob", start);
+        for (sid, at) in [("a", 10), ("b", 20), ("c", 30)] {
+            opened(&state, sid, "alice", start + Duration::from_secs(at));
+        }
+        let now = start + Duration::from_secs(40);
+        // Using `a` makes `b` alice's least recently used.
+        assert!(matches!(state.lookup_at("a", "alice", now), Lookup::Live));
+        // An opening request not yet established displaces nobody.
+        state.register_at("d", "alice", now);
+        assert_eq!(live(&state), 5);
+        state.admit("d", now);
+        assert_eq!(live(&state), 4);
+        assert!(matches!(
+            state.lookup_at("b", "alice", now),
+            Lookup::Unknown
+        ));
+        for sid in ["a", "c", "d"] {
+            assert!(
+                matches!(state.lookup_at(sid, "alice", now), Lookup::Live),
+                "{sid}"
+            );
+        }
+        assert!(matches!(state.lookup_at("bob", "bob", now), Lookup::Live));
+    }
+
+    #[test]
+    fn eviction_spares_sessions_that_are_streaming_or_mid_request() {
+        let state = capped(3);
+        let start = Instant::now();
+        for (sid, at) in [("streaming", 1), ("busy", 2), ("idle", 3)] {
+            opened(&state, sid, "alice", start + Duration::from_secs(at));
+        }
+        let _stream = open_stream(&state, "streaming");
+        let _pending = state.requests.start("busy", &json!(1));
+        // `idle` is the most recently used, but the only one with nothing
+        // in flight.
+        opened(&state, "new", "alice", start + Duration::from_secs(10));
+        let now = start + Duration::from_secs(11);
+        assert!(matches!(
+            state.lookup_at("idle", "alice", now),
+            Lookup::Unknown
+        ));
+        for sid in ["streaming", "busy", "new"] {
+            assert!(
+                matches!(state.lookup_at(sid, "alice", now), Lookup::Live),
+                "{sid}"
+            );
+        }
+    }
+
+    #[test]
+    fn admitting_a_session_sweeps_every_principals_expired_ones() {
+        let state = capped(2);
+        let start = Instant::now();
+        opened(&state, "old", "alice", start);
+        opened(
+            &state,
+            "kept",
+            "alice",
+            start + SESSION_IDLE_TTL - Duration::from_secs(60),
+        );
+        let later = start + SESSION_IDLE_TTL + Duration::from_secs(1);
+        opened(&state, "bob", "bob", later);
+        let s = state.sessions.lock().unwrap();
+        assert!(!s.live.contains_key("old"), "the expired session was swept");
+        assert!(s.live.contains_key("kept") && s.live.contains_key("bob"));
     }
 }
 
