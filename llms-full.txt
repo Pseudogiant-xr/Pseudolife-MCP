@@ -293,6 +293,12 @@ PY
 chmod 600 .env client.token
 ```
 
+The stack file mounts no documents folder, so `document_ingest` refuses
+every file (`no_document_roots`) on a stack the manager deployed. A stack
+manager would resolve `~` in such a mount under its own account, not yours.
+`pseudolife-mcp update` mounts `~/.pseudolife-mcp/documents` read-only at
+`/documents`; ingest then reads `/documents/<name>`.
+
 The first token authenticates the reserved `default` principal. Keep it
 private; never paste it into chat or tracked YAML. The Rust daemon gives
 the writable bank its identity at startup. Once it is ready, use

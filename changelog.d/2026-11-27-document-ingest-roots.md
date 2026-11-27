@@ -20,6 +20,10 @@
   client steps or the next install or update, with a one-off container of
   the daemon image already on the host; where Docker cannot, the `sudo
   chown` that fixes it is named.
+- The stack-manager file `ops/docker-compose.stack.yml` mounts no documents
+  folder (a stack manager resolves `~` under its own account), so a stack
+  the manager deployed refuses every ingest until `pseudolife-mcp update`
+  mounts the folder.
 - Upgrading: an agent that ingested files from other paths is refused until
   the file is copied into the documents folder or its directory is added to
   `memory.reference.ingest_roots` (with Docker, also mounted into the

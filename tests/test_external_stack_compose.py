@@ -69,10 +69,29 @@ def expected_stack():
     # A pinned version needs no re-pull on every redeploy, and the stack builds nothing.
     assert overlay["pull_policy"] == "always" and overlay["build"] is None
     daemon["labels"] = dict(overlay["labels"])
-    daemon["environment"].update(overlay["environment"])
-    daemon["volumes"] = [*daemon["volumes"], *overlay["volumes"]]
+    # The one deliberate difference: the stack has no documents folder. Its
+    # `~` would resolve under whichever account the stack manager runs
+    # Compose as, not the operator's, so a later `pseudolife-mcp update`
+    # (which binds the operator's folder) would refuse the mismatch. Without
+    # a documents directory every ingest is refused (`no_document_roots`).
+    environment = dict(overlay["environment"])
+    assert environment.pop(DOCUMENT_ROOTS) == "/documents", "unhandled Rust overlay documents setting"
+    volumes = [v for v in overlay["volumes"] if v != DOCUMENTS_MOUNT]
+    assert len(volumes) == len(overlay["volumes"]) - 1, "unhandled Rust overlay documents mount"
+    daemon["environment"].update(environment)
+    daemon["volumes"] = [*daemon["volumes"], *volumes]
     expected["volumes"].update(rust["volumes"])
     return expected
+
+
+DOCUMENT_ROOTS = "PSEUDOLIFE_DAEMON_DOCUMENT_ROOTS"
+DOCUMENTS_MOUNT = "~/.pseudolife-mcp/documents:/documents:ro"
+
+
+def test_the_stack_mounts_no_documents_folder():
+    daemon = load(STACK)["services"][DAEMON]
+    assert DOCUMENT_ROOTS not in daemon["environment"]
+    assert not any(":/documents" in volume for volume in daemon["volumes"])
 
 
 def test_fresh_stack_needs_no_extractor_process(monkeypatch):
