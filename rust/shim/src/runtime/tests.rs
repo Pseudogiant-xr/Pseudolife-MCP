@@ -634,6 +634,23 @@ fn redirected_tunnel_roots_and_missing_children_are_unknown_evidence() {
 }
 
 #[test]
+fn downloads_from_an_https_base_stay_on_https() {
+    use super::install::{https_only_for, release_base};
+    // The default and an HTTPS mirror: a redirect may not downgrade them.
+    assert!(https_only_for(&release_base(None, "1.2.3").unwrap()));
+    assert!(https_only_for("https://mirror.example.com/v1.2.3"));
+    assert!(https_only_for("HTTPS://Mirror.Example.com/dir"));
+    // The near miss: only an explicit plain-HTTP override fetches over HTTP.
+    assert!(!https_only_for(
+        &release_base(Some("http://127.0.0.1:8000/assets/"), "1.2.3").unwrap()
+    ));
+    assert!(!https_only_for("HTTP://10.0.0.5/assets"));
+    // An override the updater accepts with surrounding spaces still fetches.
+    assert!(!https_only_for(" http://127.0.0.1:8000/assets"));
+    assert!(https_only_for("not a url"));
+}
+
+#[test]
 fn release_base_defaults_to_the_github_release_and_honours_an_http_override() {
     use super::install::release_base;
     assert_eq!(

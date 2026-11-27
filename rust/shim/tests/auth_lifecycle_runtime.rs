@@ -364,6 +364,213 @@ async fn test_failed_spawn_releases_its_lock_and_open_failure_is_best_effort() {
     assert_eq!(control.spawn_count, 1);
 }
 
+// POSIX only, as the private spawn lock is: Windows keeps its per-user
+// %TEMP% lock unchanged, so no Windows code path moves here.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_an_older_clients_temporary_lock_still_excludes_this_spawn() {
+    let home = DisposableHome::new();
+    let mut opts = options(&home, false);
+    let legacy = home.path("legacy-spawn.lock");
+    opts.legacy_lock_path = Some(legacy.clone());
+    // An older client holds the temporary-directory lock while it starts one;
+    // the file is owner-only, as a new client creates it.
+    let held = owner_only_lock(&legacy);
+    held.try_lock().unwrap();
+    let mut control = Control::default();
+    assert!(
+        lifecycle::ensure_daemon("http://127.0.0.1:18765", &mut control, &opts)
+            .await
+            .is_err()
+    );
+    assert_eq!(control.spawn_count, 0);
+    assert!(
+        control
+            .notes
+            .iter()
+            .any(|note| note.contains("another shim is already starting one")),
+        "{:?}",
+        control.notes
+    );
+    held.unlock().unwrap();
+    // Released: this client takes both locks and starts the daemon.
+    let mut control = Control {
+        healthy_at_probe: Some(3),
+        health: json!({"status":"ok"}),
+        ..Default::default()
+    };
+    assert!(
+        lifecycle::ensure_daemon("http://127.0.0.1:18765", &mut control, &opts)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(control.spawn_count, 1);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_a_temporary_lock_this_account_does_not_own_is_never_waited_on() {
+    // Another account's file in a shared /tmp could be held forever; the
+    // stand-in here is a link to a held lock, which open_owned refuses too.
+    let home = DisposableHome::new();
+    let mut opts = options(&home, false);
+    // Its target is owner-only, so only the refusal to follow a link skips it.
+    let elsewhere = home.path("elsewhere.lock");
+    let held = owner_only_lock(&elsewhere);
+    held.try_lock().unwrap();
+    let legacy = home.path("legacy-link.lock");
+    std::os::unix::fs::symlink(&elsewhere, &legacy).unwrap();
+    opts.legacy_lock_path = Some(legacy);
+    let mut control = Control {
+        healthy_at_probe: Some(3),
+        health: json!({"status":"ok"}),
+        ..Default::default()
+    };
+    assert!(
+        lifecycle::ensure_daemon("http://127.0.0.1:18765", &mut control, &opts)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(control.spawn_count, 1);
+    held.unlock().unwrap();
+}
+
+#[cfg(unix)]
+fn owner_only_lock(path: &Path) -> fs::File {
+    use std::os::unix::fs::OpenOptionsExt;
+    fs::OpenOptions::new()
+        .read(true)
+        .append(true)
+        .create(true)
+        .mode(0o600)
+        .open(path)
+        .unwrap()
+}
+
+#[cfg(unix)]
+fn readable_by_others_lock(path: &Path) -> fs::File {
+    use std::os::unix::fs::PermissionsExt;
+    let file = owner_only_lock(path);
+    fs::set_permissions(path, fs::Permissions::from_mode(0o644)).unwrap();
+    file
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_a_temporary_lock_other_accounts_can_open_is_never_waited_on() {
+    // An older client left the /tmp file 0644: another account can open it
+    // read-only and hold its lock forever, so it is not trusted, as a legacy
+    // lock beside the private one or as the only lock.
+    for shared in [false, true] {
+        let home = DisposableHome::new();
+        let mut opts = options(&home, false);
+        let legacy = home.path("legacy-0644.lock");
+        let held = readable_by_others_lock(&legacy);
+        held.try_lock().unwrap();
+        if shared {
+            opts.lock_path = legacy.clone();
+            opts.lock_is_shared = true;
+        } else {
+            opts.legacy_lock_path = Some(legacy.clone());
+        }
+        let mut control = Control {
+            healthy_at_probe: Some(3),
+            health: json!({"status":"ok"}),
+            ..Default::default()
+        };
+        assert!(
+            lifecycle::ensure_daemon("http://127.0.0.1:18765", &mut control, &opts)
+                .await
+                .unwrap()
+                .is_some(),
+            "shared={shared}"
+        );
+        assert_eq!(control.spawn_count, 1, "shared={shared}");
+        held.unlock().unwrap();
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_without_a_private_lock_file_the_legacy_lock_still_excludes() {
+    let home = DisposableHome::new();
+    let mut opts = options(&home, false);
+    // The private lock cannot be opened (its folder is missing) ...
+    opts.lock_path = home.path("missing-folder/spawn.lock");
+    let legacy = home.path("legacy-spawn.lock");
+    opts.legacy_lock_path = Some(legacy.clone());
+    // ... and an older client holds the legacy one.
+    let held = owner_only_lock(&legacy);
+    held.try_lock().unwrap();
+    let mut control = Control::default();
+    assert!(
+        lifecycle::ensure_daemon("http://127.0.0.1:18765", &mut control, &opts)
+            .await
+            .is_err()
+    );
+    assert_eq!(control.spawn_count, 0);
+    held.unlock().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_the_spawn_lock_folder_is_private_to_this_account() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = DisposableHome::new();
+    let dir = lifecycle::private_spawn_lock_dir(&home.0).expect("a private spawn-lock folder");
+    assert_eq!(dir, home.0.join(".pseudolife-mcp").join("spawn-locks"));
+    assert_eq!(
+        fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    // Asking again keeps the same folder (a second client, a rerun).
+    assert_eq!(lifecycle::private_spawn_lock_dir(&home.0), Some(dir));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_the_spawn_lock_folder_is_made_only_when_a_spawn_needs_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = DisposableHome::new();
+    let dir = lifecycle::spawn_lock_dir(&home.0);
+    let mut opts = lifecycle::EnsureOptions::new("http://127.0.0.1:18765", false, &dir);
+    opts.private_lock_home = Some(home.0.clone());
+    // The daemon answers: this shim never locks, so the home is left as it was.
+    let mut control = Control {
+        healthy_at_probe: Some(1),
+        health: json!({"status":"ok"}),
+        ..Default::default()
+    };
+    assert!(
+        lifecycle::ensure_daemon("http://127.0.0.1:18765", &mut control, &opts)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(control.spawn_count, 0);
+    assert!(!dir.exists(), "{}", dir.display());
+    // No daemon: the folder is made owner-only and its lock taken before the spawn.
+    let mut control = Control {
+        healthy_at_probe: Some(3),
+        health: json!({"status":"ok"}),
+        ..Default::default()
+    };
+    assert!(
+        lifecycle::ensure_daemon("http://127.0.0.1:18765", &mut control, &opts)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(control.spawn_count, 1);
+    assert_eq!(
+        fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    assert!(opts.lock_path.starts_with(&dir) && opts.lock_path.is_file());
+}
+
 #[test]
 fn test_spawn_daemon_never_allocates_a_console_window() {
     assert_eq!(lifecycle::WINDOWS_DETACHED_FLAGS, 0x08000000 | 0x00000200);

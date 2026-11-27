@@ -217,6 +217,38 @@ pub fn spawn_lock_path(url: &str, temporary: &Path) -> PathBuf {
     let digest = format!("{:x}", Sha1::digest(url.as_bytes()));
     temporary.join(format!("pseudolife-mcp-spawn-{}.lock", &digest[..10]))
 }
+/// Where the spawn lock lives: `~/.pseudolife-mcp/spawn-locks`, a folder of
+/// its own made owner-only, so no other account can hold it and stall this one's daemon
+/// start. The temporary-directory lock older clients (and the Python shim)
+/// take is the legacy lock, still taken beside it while this account owns it
+/// (see [`SpawnLock::open_owned`]), so two client versions still exclude each
+/// other. `None` when the folder cannot be made private: the legacy lock alone.
+/// POSIX only: Windows' temporary directory is per-user already.
+#[cfg(unix)]
+pub fn private_spawn_lock_dir(home: &Path) -> Option<PathBuf> {
+    let dir = spawn_lock_dir(home);
+    crate::board::state::private_dir(&dir).ok().map(|()| dir)
+}
+/// The path [`private_spawn_lock_dir`] makes, without making it: a shim
+/// whose daemon answers never needs the folder, so it is made only when a
+/// spawn takes its lock.
+#[cfg(unix)]
+pub fn spawn_lock_dir(home: &Path) -> PathBuf {
+    home.join(".pseudolife-mcp").join("spawn-locks")
+}
+/// Makes `home`'s private spawn-lock folder; false when it cannot be made
+/// owner-only. Only POSIX names a private folder (see [`private_spawn_lock_dir`]).
+fn private_lock_folder_made(home: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        private_spawn_lock_dir(home).is_some()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = home;
+        true
+    }
+}
 struct SpawnLock {
     file: File,
     held: bool,
@@ -231,9 +263,54 @@ impl SpawnLock {
             .ok()
             .map(|file| Self { file, held: false })
     }
+    /// The legacy lock in a shared temporary directory, only when no other
+    /// account can hold it: a regular file this account owns, owner-only,
+    /// with one link, opened without following a link. Any other file there
+    /// is skipped, because another account that can open it can hold its
+    /// lock forever (`flock` needs only a read descriptor); older clients
+    /// made it 0644, so on such a host the two versions no longer exclude
+    /// each other, and the second daemon simply fails to bind the port.
+    /// Windows' temporary directory is per-user, so it opens as before.
+    fn open_owned(path: &Path) -> Option<Self> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+            let file = OpenOptions::new()
+                .read(true)
+                .append(true)
+                .create(true)
+                .mode(0o600)
+                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+                .open(path)
+                .ok()?;
+            let info = file.metadata().ok()?;
+            (info.is_file()
+                && info.uid() == rustix::process::geteuid().as_raw()
+                && info.mode() & 0o077 == 0
+                && info.nlink() == 1)
+                .then_some(Self { file, held: false })
+        }
+        #[cfg(not(unix))]
+        {
+            Self::open(path)
+        }
+    }
+    /// Whether this client may go on: it holds the lock, or locking is not
+    /// possible here at all (a filesystem without lock support, such as some
+    /// network homes), where the lock is best effort as a failed open is.
+    /// Only another holder makes it wait.
     fn try_acquire(&mut self) -> bool {
-        self.held = self.file.try_lock().is_ok();
-        self.held
+        if self.held {
+            return true;
+        }
+        match self.file.try_lock() {
+            Ok(()) => {
+                self.held = true;
+                true
+            }
+            Err(std::fs::TryLockError::WouldBlock) => false,
+            Err(std::fs::TryLockError::Error(_)) => true,
+        }
     }
 }
 impl Drop for SpawnLock {
@@ -249,6 +326,17 @@ pub struct EnsureOptions {
     pub no_spawn: bool,
     pub no_spawn_reason: Option<&'static str>,
     pub lock_path: PathBuf,
+    /// The temporary-directory lock older clients take, held beside
+    /// `lock_path` when this account owns it.
+    pub legacy_lock_path: Option<PathBuf>,
+    /// `lock_path` itself is the shared temporary-directory lock (no private
+    /// folder could be made), so it is vetted as the legacy lock is.
+    pub lock_is_shared: bool,
+    /// The home whose private spawn-lock folder holds `lock_path`. The folder
+    /// is made owner-only just before the lock opens, so a daemon that answers
+    /// leaves the home as it was; if it cannot be made private, the vetted
+    /// legacy lock is used alone.
+    pub private_lock_home: Option<PathBuf>,
     pub external_wait: Duration,
     pub spawn_floor: Duration,
     pub spawn_ceiling: Duration,
@@ -259,6 +347,9 @@ impl EnsureOptions {
             no_spawn,
             no_spawn_reason: None,
             lock_path: spawn_lock_path(url, temporary),
+            legacy_lock_path: None,
+            lock_is_shared: false,
+            private_lock_home: None,
             external_wait: EXTERNAL_WAIT,
             spawn_floor: SPAWN_WAIT,
             spawn_ceiling: SPAWN_WAIT_ALIVE,
@@ -489,11 +580,29 @@ pub async fn ensure_daemon<C: DaemonControl>(
         control.note(&format!("[shim] no answer from the memory daemon at {url}.\n  ({reason}, so no fallback daemon was spawned.)\n{LOCAL_REMEDY}\n{STARTING_WITHOUT_DAEMON}"));
         return Ok(None);
     }
-    let mut lock = SpawnLock::open(&options.lock_path);
+    let private_ready = options
+        .private_lock_home
+        .as_deref()
+        .is_none_or(private_lock_folder_made);
+    let mut lock = if !private_ready {
+        None
+    } else if options.lock_is_shared {
+        SpawnLock::open_owned(&options.lock_path)
+    } else {
+        SpawnLock::open(&options.lock_path)
+    };
+    let mut legacy = options
+        .legacy_lock_path
+        .as_deref()
+        .and_then(SpawnLock::open_owned);
+    // The private lock file could not be opened: the vetted legacy lock alone.
+    if lock.is_none() {
+        lock = legacy.take();
+    }
     if let Some(lock) = &mut lock {
         let mut announced = false;
         let start = control.now();
-        while !lock.try_acquire() {
+        while !(lock.try_acquire() && legacy.as_mut().is_none_or(SpawnLock::try_acquire)) {
             if !announced {
                 control.note(&format!("[shim] no daemon at {url} — another shim is already starting one; waiting for it..."));
                 announced = true;
@@ -859,8 +968,31 @@ impl Runtime {
         } else {
             no_spawn_reason
         };
-        let mut options =
-            EnsureOptions::new(&url, no_spawn || launch.is_none(), &std::env::temp_dir());
+        let temporary = std::env::temp_dir();
+        // Only a POSIX temporary directory is shared between accounts; on
+        // Windows %TEMP% is per-user, so the lock stays where it was.
+        // The private folder is only named here; `ensure_daemon` makes it
+        // when a spawn needs its lock.
+        #[cfg(unix)]
+        let home = crate::credentials::expand_user(Path::new("~")).ok();
+        #[cfg(not(unix))]
+        let home: Option<PathBuf> = None;
+        #[cfg(unix)]
+        let private = home.as_deref().map(spawn_lock_dir);
+        #[cfg(not(unix))]
+        let private: Option<PathBuf> = None;
+        let mut options = EnsureOptions::new(
+            &url,
+            no_spawn || launch.is_none(),
+            private.as_deref().unwrap_or(&temporary),
+        );
+        if private.is_some() {
+            options.legacy_lock_path = Some(spawn_lock_path(&url, &temporary));
+            options.private_lock_home = home;
+        } else {
+            // POSIX without a private folder: the shared lock alone, vetted.
+            options.lock_is_shared = cfg!(unix);
+        }
         options.no_spawn_reason = no_spawn_reason;
         let mut control = HttpDaemonControl::new(launch);
         let health = ensure_daemon(&url, &mut control, &options).await?;

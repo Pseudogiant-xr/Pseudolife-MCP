@@ -325,6 +325,7 @@ pub(crate) fn download(url: &str) -> Result<Option<Vec<u8>>> {
     block_on(async {
         let client = reqwest::Client::builder()
             .user_agent("pseudolife-mcp")
+            .https_only(crate::runtime::https_only_for(url))
             .timeout(Duration::from_secs(120))
             .build()
             .map_err(|_| UpdateError::new("cannot initialize release download"))?;

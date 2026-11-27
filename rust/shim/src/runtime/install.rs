@@ -515,6 +515,7 @@ fn download_release(version: &str) -> Result<(Vec<u8>, String, impl Fn(String) -
             .map_err(io_error)?
             .block_on(async {
                 let client = reqwest::Client::builder()
+                    .https_only(https_only_for(&base_clone))
                     .timeout(Duration::from_secs(300))
                     .build()
                     .map_err(|e| e.to_string())?;
@@ -575,6 +576,17 @@ pub fn stage_release(version: &str, directory: &Path) -> Result<PathBuf> {
         Ok(binary)
     })();
     staged.map_err(named)
+}
+
+/// Whether a download that starts at `url` must stay on HTTPS through its
+/// redirects: always for an `https://` start (the GitHub default, or an
+/// HTTPS mirror), so a redirect cannot downgrade it. Only a plain `http://`
+/// base, which `PSEUDOLIFE_RELEASE_BASE_URL` or `PSEUDOLIFE_NATIVE_ARCHIVE_URL`
+/// must name explicitly, fetches over HTTP.
+pub(crate) fn https_only_for(url: &str) -> bool {
+    // The parsed scheme, as the callers' own checks read it (Url::parse trims
+    // the spaces an override may carry); an unparsable URL stays HTTPS-only.
+    reqwest::Url::parse(url).map_or(true, |parsed| parsed.scheme() != "http")
 }
 
 /// A download, checksum or install error, naming the override when one chose
