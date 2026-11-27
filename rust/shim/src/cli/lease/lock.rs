@@ -188,7 +188,11 @@ impl Lock {
         self.file = Some(file);
         Ok(true)
     }
-    /// The open, locked file while this lock holds it.
+    /// The open, locked file while this lock holds it. Unix only: a full
+    /// update hand-off child inherits it there (`UpdateLock::
+    /// inherit_by_children`); on Windows the child's job ends it with its
+    /// parent instead.
+    #[cfg(unix)]
     pub fn file(&self) -> Option<&File> {
         self.file.as_ref()
     }
