@@ -3,7 +3,7 @@
   "title": "PseudoLife-MCP System Atlas",
   "version": "0.26.0",
   "schema": 59,
-  "verified": "2026-11-26"
+  "verified": "2026-11-28"
  },
  "groups": {
   "clients": {
@@ -1165,7 +1165,7 @@
    "s": "one-shot idempotent installer",
    "p": "ops/",
    "d": [
-    "The installers default to the native client: they verify the release archive and run setup without host Python, falling back to the Python client where the native one cannot serve the machine. PSEUDOLIFE_SHIM_ENGINE=python installs the Python client and is remembered. The client choice is separate from the Docker daemon engine.",
+    "The installers default to the native client: they verify the release archive and run setup without host Python, falling back to the Python client where the native one cannot serve the machine. PSEUDOLIFE_SHIM_ENGINE=python installs the Python client and is remembered. The client choice is separate from the Docker daemon engine, and the installers never install the retired Python daemon (--engine python is refused).",
     "providers (multi-select + capability matrix) → preflight → extractor mode",
     "volumes → managed .env → Compose startup → hooks → MCP registration. Native reruns skip Compose for an unchanged stack, use up --no-build to start existing images, and use up --build when the checkout or images changed.",
     "Providers: claude / claude-desktop / codex / gemini / generic; per-provider writer ids",
@@ -1279,7 +1279,7 @@
     "TRUST_BIND=1 is safe: compose publishes loopback-only — the port publish is the security boundary",
     "Override file: swap extractor GGUF or disable the sidecar (profiles)",
     "Daemon mem_limit 6g (memswap pinned equal - no swap; 4g OOM-killed it 2026-09-23); MALLOC_ARENA_MAX=2",
-    "ops/docker-compose.ghcr.yml overlays the GHCR daemon and pg images (PSEUDOLIFE_IMAGE_TAG); byte-equal copies ship in pseudolife_memory/compose/ for an update with no checkout"
+    "ops/docker-compose.ghcr.yml overlays the GHCR pg image and the retired Python daemon image (frozen at 0.25.x; from 0.26.0 releases use docker-compose.rust-ghcr.yml on top of it, with PSEUDOLIFE_IMAGE_TAG); byte-equal copies ship in pseudolife_memory/compose/ for an update with no checkout"
    ]
   },
   {
@@ -1416,7 +1416,7 @@
    "d": [
     "The guards match the tag to pyproject, both server.json versions and both native crate versions before build. PyPI uses OIDC and a human-approved environment.",
     "The native asset build can attach the archives, Compose bundle and SHA256SUMS even if the independent wheel build fails. PyPI publish requires both paths to succeed.",
-    "After PyPI: Python daemon and PostgreSQL images go to GHCR, and the Rust daemon image is published if PSEUDOLIFE_PUBLISH_RUST_DAEMON is true. Both image jobs must succeed before RELEASE-READY.json is attached. The registry job publishes server.json through OIDC."
+    "After PyPI: the PostgreSQL image goes to GHCR (no Python daemon image since 0.26.0), and the Rust daemon image is published if PSEUDOLIFE_PUBLISH_RUST_DAEMON is true. Both image jobs must succeed before RELEASE-READY.json is attached. The registry job publishes server.json through OIDC."
    ]
   },
   {
@@ -1441,10 +1441,10 @@
    "s": "pseudolife-daemon · default Docker engine",
    "p": "rust/daemon",
    "d": [
-    "The Docker tier's default daemon since 0.23.0, image ghcr.io/<owner>/pseudolife-daemon-rust:<ver> (debian:bookworm-slim, no Python); pseudolife-mcp update --engine rust | python switches engines on the same bank",
+    "The Docker tier's default daemon since 0.23.0, image ghcr.io/<owner>/pseudolife-daemon-rust:<ver> (debian:bookworm-slim, no Python); a release-mode pseudolife-mcp update moves every Python host to it on the same bank and refuses --engine python; a checkout deploy still takes either engine",
     "Discovers stable GitHub releases with the complete native asset set and RELEASE-READY.json. The native updater uses the same readiness requirement for latest-release discovery.",
     "Requires PSEUDOLIFE_MCP_DATABASE_URL: no file mode and no embedded lite Postgres; models are provisioned at install or first start into the pseudolife_rust_models volume",
-    "The Python daemon (daemon.py) is frozen and still runs a host that chose --engine python"
+    "The Python daemon (daemon.py) is frozen and retired: a release update moves every host to Rust, and only a checkout deploy or the bearer handover leaves one on it"
    ]
   },
   {
@@ -1457,7 +1457,7 @@
    "p": "rust/shim",
    "d": [
     "Crate pseudolife-stdio, released as the pseudolife-mcp binary: the stdio shim and the CLI in one program, installed as a numbered runtime (runtime.json kind native) behind the same launcher as the Python runtimes",
-    "Native commands include update with client hand-off, backup and restore for Docker banks, connect, console, conductor-watch, doctor, the hook leaves and expose. Native move handles help, refusals, dry runs, the move and recovery.",
+    "Native commands include update with the full hand-off to the target release's updater and the client-step hand-off, backup and restore for Docker banks, connect, console, conductor-watch, doctor, the hook leaves and expose. Native move handles help, refusals, dry runs, the move and recovery.",
     "Native tunnel supports explicit profile and key setup, verification, foreground run and stop, and refresh of a compatible supervisor. Python still provides guided setup, background start and service management.",
     "Refuses a lite-tier bank, serve and embedded (cli/retired.rs); starts a local daemon only from PSEUDOLIFE_MCP_SERVE_COMMAND",
     "The installers' default since 0.26.0, and a person's update moves a Python-client machine to it; updates that run without a person (scheduled and session-start), PSEUDOLIFE_SHIM_ENGINE=python and a registered tunnel autostart keep the Python client. Install and update verify the platform archive before moving the client."
@@ -1643,7 +1643,7 @@
    "s": "pseudolife-mcp update · the Python client's updater",
    "p": "pseudolife_memory/update_cli.py",
    "d": [
-    "Release mode: newest PyPI version → refuse a downgrade → docker pull the GHCR daemon image → backup → rollback tag <current>-pre-update-<stamp> (tags retained) → compose up -d --no-deps pseudolife-daemon (GHCR overlay) → health expecting that version → clients (not with --daemon-only)",
+    "Release mode: newest PyPI version → refuse a downgrade → docker pull the GHCR daemon image (from 0.26.0 this pull fails with nothing changed: there is no Python image; the native updater moves the host) → backup → rollback tag <current>-pre-update-<stamp> (tags retained) → compose up -d --no-deps pseudolife-daemon (GHCR overlay) → health expecting that version → clients (not with --daemon-only)",
     "Checkout mode (--checkout; what ops/update.* run): clean-tree guard (--allow-dirty) → backup → rollback tag (retained) → HEAD re-checked → up -d --no-deps --build with git sha / dirty / build time stamped → health → clients only with --all → test-suite login (test-login create, never --rotate) when this account has no test-pg.env, the bundled Postgres runs here and the suite's test server (PSEUDOLIFE_TEST_PG_HOST_PORT, else ~/.config/pseudolife-suite/env, else 127.0.0.1:5433) is its published port; a default-only match asks y/N at a terminal and otherwise skips (--no-test-login skips; release mode never) → BuildKit cache prune",
     "Held under an OS update.lock in the data dir (busy = exit 2); backup is the checkout's backup script, else a built-in in-container pg_dump + /data tar; exit 1 daemon failure, 2 could not run, 3 current, 5 client step failed",
     "Both Docker modes end (not with --clients-only) with one line naming pseudolife-mcp maintainer setup while a bearer-gated daemon has no valid coordination.maintainer name or no active passkey (maintainer_setup.passkeys_set_up); at a terminal it offers to run it (default no) after the update lock is released, passing --yes"

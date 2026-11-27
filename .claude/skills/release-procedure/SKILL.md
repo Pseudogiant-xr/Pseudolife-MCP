@@ -97,8 +97,8 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    any version field the cut missed (`pyproject.toml` is one of them while
    the wheel is published).
 
-   **While the release still publishes the Python package** (the wheel and
-   the Python daemon image, whose dependencies are floors), the cut's local
+   **While the release still publishes the Python package** (the wheel,
+   whose dependencies are floors), the cut's local
    validation runs the whole suite with `--include-frozen`
    (`pwsh ops/wsl-suite.ps1 tests/ --include-frozen`), since a run collects
    only the live files otherwise and the frozen package's tests are what can
@@ -223,7 +223,7 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    `RELEASE-READY.json` each appear once with state `uploaded` and a positive
    size. Use `gh release download v<version> --pattern RELEASE-READY.json` to
    verify the marker's version and commit match the tag and its digests match
-   the published daemon, PostgreSQL and Rust images.
+   the published PostgreSQL and Rust daemon images.
    `PSEUDOLIFE_PUBLISH_RUST_DAEMON` must be `true`: with it off the Rust image
    job is skipped, no marker is attached, and native clients and daemons never
    learn of the release. The build-only dispatch verifies the archive bundle

@@ -3144,7 +3144,8 @@ The LongMemEval measurements cited in this section came from the Python engine.
   2026-11-02: the Python daemon still runs them, and the Rust daemon
   refuses to start on them, naming the setting and the fix. A
   `pseudolife-mcp update` checks this before it moves a host to the Rust
-  daemon and keeps such a host on Python until the bank is flattened.
+  daemon: it refuses before the backup and leaves the Python daemon running
+  as it was. Flatten the bank, then run `pseudolife-mcp update`.
   **Moving an existing bank to flat:** first rehearse restoring the exact
   bank **and its config** with your own tooling. An automatic paired restore
   for an explicit database URL is not available. Stop the daemon and use
@@ -4867,7 +4868,8 @@ gone AND no env file was found beside them, the update stops unless
 `--env-file` names one: the bundled compose files without the env would
 reset the Postgres password, the volume names and the bearer.
 The rollback is the running image tagged by id as
-`ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>-pre-update-<stamp>`,
+`ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>-pre-update-<stamp>`
+(the `pseudolife-daemon` repository for a host still on the Python daemon),
 because the GHCR overlay selects the daemon's image through
 `PSEUDOLIFE_IMAGE_TAG`: the printed rollback is that variable naming the
 tag on the same `docker compose … up -d --no-deps pseudolife-daemon`. A

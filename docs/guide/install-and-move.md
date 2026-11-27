@@ -48,10 +48,13 @@ in release mode (a checkout deploy still takes it). The one run that stays
 on Python is the explicit bearer handover (`--allow-auth-change`): the move
 needs a bearer, so a Python daemon that runs without one first gets it that
 way, and the next attended update moves the host.
-The updater that deploys the daemon is the one already installed, so an
-update started from a release older than 0.23.0 installs the new release
-on the Python daemon. The next attended `pseudolife-mcp update` can move
-the host. When the native updater deploys a Rust daemon over a legacy
+The updater that deploys the daemon is the one already installed. An
+updater older than 0.26.0 cannot update a host that chose the Python daemon
+to 0.26.0: it stops at the pull of a Python image 0.26.0 does not publish,
+with nothing changed. Run
+`pseudolife-mcp update --clients-only && pseudolife-mcp update` there; the
+first command installs the 0.26.0 updater, and the second moves the host.
+When the native updater deploys a Rust daemon over a legacy
 bank, it first runs the archived Python 0.23.1 daemon to finish the
 import. This applies to banks below schema 57, with counters still in
 `weights.pt`, or with an unfinished Chroma import. The archived image is
@@ -61,11 +64,10 @@ refuses before taking a backup. Restore a verified backup on a Linux
 amd64 Docker host, complete the update there, then move the migrated
 bank back. The Python updater uses its own import path.
 
-Scheduled (`--unattended`) updates always keep the installed engine. On
-a Python host, if the newest release has no Python image or the update
-requires the legacy import, the scheduled run holds and posts one notice
-per reason per release. Run `pseudolife-mcp update --engine rust --tag <version>`
-once at a terminal, using the version in the notice. A scheduled run
+A scheduled (`--unattended`) update on a Python host always holds and
+posts one notice, also when the host is already at the newest release,
+because the move to the Rust daemon needs an attended run. Run
+`pseudolife-mcp update` once at a terminal. A scheduled run
 leaves an interrupted attended bridge in place. Use the same command at
 a terminal to resume it.
 
