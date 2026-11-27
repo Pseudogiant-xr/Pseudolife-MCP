@@ -75,11 +75,18 @@ impl LabelArg {
     }
 }
 
+/// A look at the cortex that a fact writer (`cortex_write`, `set_add`,
+/// `set_remove`, `cortex_resolve`) runs under the write lock, immediately
+/// before it changes the store, so nothing else can change the slot in
+/// between: the dream journals its rollback pre-image this way.
+pub(crate) type BeforeWrite = Arc<dyn Fn(&crate::stores::cortex::CortexStore) + Send + Sync>;
+
 /// The arguments of `service.cortex_write` (`service.py:3916-3933`) but
 /// `now`, which no caller passes: `memory_fact_set` binds its MCP
 /// arguments (`Self::bind`); the dream's claim writes pass `support`,
-/// `stance`, both labels, `dream=True` and, to park, `provenance` and
-/// `force_contend` (`service_dream.py:2106-2208`).
+/// `stance`, both labels, `dream=True`, their pre-image capture
+/// (`before_write`) and, to park, `provenance` and `force_contend`
+/// (`service_dream.py:2106-2208`).
 pub(crate) struct CortexWriteArgs {
     pub entity: String,
     pub attribute: String,
@@ -96,6 +103,7 @@ pub(crate) struct CortexWriteArgs {
     pub authority: LabelArg,
     pub distortion_tolerance: LabelArg,
     pub dream: bool,
+    pub before_write: Option<BeforeWrite>,
 }
 
 impl CortexWriteArgs {
@@ -118,6 +126,7 @@ impl CortexWriteArgs {
             authority: LabelArg::auto(),
             distortion_tolerance: LabelArg::auto(),
             dream: false,
+            before_write: None,
         }
     }
 
@@ -295,7 +304,12 @@ pub(crate) async fn cortex_write(
     };
     let outcome = ready
         .cortex
-        .write(|s| s.write_fact(&w))
+        .write(|s| {
+            if let Some(look) = &a.before_write {
+                look(s);
+            }
+            s.write_fact(&w)
+        })
         .map_err(|_| ToolError::Invalid(SET_SLOT_REFUSAL.into()))?;
     if !crate::mutants::active("mcp-fact-set-no-entity-mint") {
         ensure_subject_entity(db, &a.entity)

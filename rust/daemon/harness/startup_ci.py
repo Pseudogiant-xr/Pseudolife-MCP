@@ -48,6 +48,8 @@ BANK_IDENTITY_CHECKS = (
     # Not an identity check, but the same fixture: a disposable bank and the
     # offline embedder through a whole Service.
     "service::tests::writes_embed_before_taking_the_write_lock",
+    "dream::run::preimage_tests::a_forget_while_a_claim_waits_for_the_lock_is_not_its_pre_image",
+    "dream::run::preimage_tests::each_claim_writer_journals_the_slot_it_found",
 )
 
 

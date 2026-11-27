@@ -10,7 +10,7 @@ use std::sync::Arc;
 use serde_json::{Map, Value, json};
 
 use crate::episodes::{self, Caller};
-use crate::fact_set::{embed, ensure_subject_entity, internal, save_cortex};
+use crate::fact_set::{BeforeWrite, embed, ensure_subject_entity, internal, save_cortex};
 use crate::mcp::dispatch::{ToolCall, ToolError, ToolFn, ToolFuture};
 use crate::service::{Ready, Service};
 use crate::store::py_strip;
@@ -122,6 +122,7 @@ pub(crate) struct SetAddArgs {
     pub origin: Option<String>,
     pub confidence: f64,
     pub dream: bool,
+    pub before_write: Option<BeforeWrite>,
 }
 
 impl SetAddArgs {
@@ -136,6 +137,7 @@ impl SetAddArgs {
             origin: None,
             confidence: SET_ADD_CONFIDENCE,
             dream: false,
+            before_write: None,
         }
     }
 }
@@ -149,6 +151,7 @@ pub(crate) struct SetRemoveArgs {
     pub member: String,
     pub origin: Option<String>,
     pub dream: bool,
+    pub before_write: Option<BeforeWrite>,
 }
 
 impl SetRemoveArgs {
@@ -159,6 +162,7 @@ impl SetRemoveArgs {
             member: member.into(),
             origin: None,
             dream: false,
+            before_write: None,
         }
     }
 }
@@ -241,7 +245,12 @@ pub(crate) async fn set_add(
         provenance: a.provenance.clone(),
         dream: a.dream,
     };
-    let outcome = ready.cortex.write(|s| s.add_member(&w));
+    let outcome = ready.cortex.write(|s| {
+        if let Some(look) = &a.before_write {
+            look(s);
+        }
+        s.add_member(&w)
+    });
     // Every outcome, invalid and capped included, may mint the subject.
     ensure_subject_entity(db, &a.entity)
         .await
@@ -273,6 +282,9 @@ pub(crate) async fn set_remove(
     let ws = ready.write.lock().await;
     let now = episodes::now();
     let outcome = ready.cortex.write(|s| {
+        if let Some(look) = &a.before_write {
+            look(s);
+        }
         s.remove_member(
             &a.entity,
             &a.attribute,

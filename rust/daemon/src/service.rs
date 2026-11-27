@@ -552,6 +552,13 @@ impl Service {
         self.inner.lock().await
     }
 
+    /// Test seam: the embedder the next initialization uses, as tests in
+    /// other modules load the offline fixture model.
+    #[cfg(test)]
+    pub(crate) async fn use_embedder(&self, embedder: Arc<Embedder>) {
+        self.inner.lock().await.embedder = Some(embedder);
+    }
+
     pub async fn ensure_init(self: &Arc<Self>) -> Result<Arc<Ready>, String> {
         let me = self.clone();
         tokio::spawn(async move { me.init(false).await })
