@@ -533,9 +533,14 @@ fn a_handed_off_run_never_hands_off_again() {
 
 #[test]
 fn the_probe_lists_this_version_and_the_protocol() {
+    // One line of protocols, space-separated: the Python parents
+    // (update_cli.py, update_bridge.py) split it and look for theirs.
     assert_eq!(
         probe_text(),
-        format!("{}\nclient-handoff-v1\n", env!("CARGO_PKG_VERSION"))
+        format!(
+            "{}\nclient-handoff-v1 full-update-v1\n",
+            env!("CARGO_PKG_VERSION")
+        )
     );
 }
 

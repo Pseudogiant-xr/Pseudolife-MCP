@@ -23,30 +23,37 @@ release publishes: it checks free disk space, pulls that image and
 downloads the pinned models (about 2.4 GB, once, into their own
 `pseudolife_rust_models` volume, which stays out of every backup) before
 any container starts, and records the selection once the daemon reports ready at that
-release. With no `--engine`, the install takes the Python daemon instead,
-saying why, when it has no bearer token (`--no-token`, `--transport http`
-with no token set, or a Python-client install on a host that cannot
-install the shim and so mints none), when the release publishes no Rust image or its models cannot be
-downloaded, or when the bank already exists
-(the next attended `pseudolife-mcp update` moves that bank, after its own
-checks). `ops/install.sh --engine python` (Windows: `ops/install.ps1
--Engine python`) chooses Python and records that choice, so later updates
-keep it. `--engine rust` names Rust explicitly: without a bearer, image or
-models it refuses, names `--engine python`, and starts nothing; for a bank
-that already exists it installs on Python and then switches through update
+release. The Python daemon is retired, so no install takes it: without a
+bearer token (`--no-token`, `--transport http` with no token set, or a
+Python-client install on a host that cannot install the shim and so mints
+none), or when the release publishes no Rust image or its models cannot
+be downloaded, the install refuses with the cause and its fix and starts
+nothing, and `--engine python` (Windows: `-Engine python`) is refused. A
+bank that already exists, or a host still on the Python daemon, comes up
+as it is and is then moved to Rust by `pseudolife-mcp update`, which
+checks the bank first; `--engine rust` names the same engine explicitly
+and switches through update
 (below).
 
-A release-mode `pseudolife-mcp update` moves a Docker host that never
-chose an engine to the Rust daemon when the target release publishes its
-image. An ordinary update can move the host from a script, an SSH command
-or an agent's shell too. Before it downloads the models or backs
-anything up, the update asks the Rust image whether it supports this bank's configuration (`pseudolife-daemon
-check-config`: a non-default reranker or embedding model, for instance, is
-not). If that check, or anything else before the backup, refuses, the update
-removes what it pulled for the move, warns with the refusal and its fix,
-and continues on Python; nothing is recorded, so the next update tries
-again. `--engine python` keeps Python for good, and `--engine rust` refuses
-an unsupported configuration before the backup instead of falling back.
+A release-mode `pseudolife-mcp update` moves a Docker host still on the
+Python daemon to the Rust daemon: the Python daemon is retired and gets no
+more fixes, so no release update keeps it, whatever an earlier
+`--engine python` recorded. An ordinary update makes the move from a
+script, an SSH command or an agent's shell too. Before it downloads the
+models or backs anything up, the update asks the Rust image whether it
+supports this bank's configuration (`pseudolife-daemon check-config`: a
+non-default reranker or embedding model, for instance, is not). If that
+check, or anything else before the backup, refuses, the update removes what
+it pulled for the move and stops with the refusal and its fix; the Python
+daemon keeps running as it was, and the next update tries again once the
+cause is fixed. A release that publishes no Rust image is refused the same
+way. The scheduled `--unattended` update does not make the move: on a
+Python host it holds and asks for one attended `pseudolife-mcp update`.
+`--no-backup` is refused on a Python host, and `--engine python` is refused
+in release mode (a checkout deploy still takes it). The one run that stays
+on Python is the explicit bearer handover (`--allow-auth-change`): the move
+needs a bearer, so a Python daemon that runs without one first gets it that
+way, and the next attended update moves the host.
 The updater that deploys the daemon is the one already installed, so an
 update started from a release older than 0.23.0 installs the new release
 on the Python daemon. The next attended `pseudolife-mcp update` can move
@@ -214,7 +221,21 @@ message, then rerun the original installer:
 Use [`ops/docker-compose.stack.yml`](../../ops/docker-compose.stack.yml)
 unchanged with Portainer, Dockge, Komodo, or a plain Docker Compose folder.
 It is self-contained: two GHCR images, no local builds, includes, or overlays.
-This is a Docker Compose deployment, not a Swarm stack.
+This is a Docker Compose deployment, not a Swarm stack. Its daemon is the
+Rust daemon, pinned by default to the release the file comes from; on
+first start it downloads its pinned models (about 2.4 GB, once) into the
+`pseudolife_rust_models` volume, which stays out of every backup.
+
+A stack deployed from an earlier release's file may still run the retired
+Python daemon. Move it with `pseudolife-mcp update` on the Docker host
+(["Updates, backups and names to preserve"](#updates-backups-and-names-to-preserve)
+gives the command): it backs the bank up, checks the configuration against
+the Rust image, finishes any legacy import and only then recreates the
+daemon. Do not move it by pasting the new file over the old stack in the
+manager, which swaps the engine with none of those steps. Once the update
+reports the Rust daemon healthy, replace the stack in the manager with this
+release's file (same project name and env file), so that a later redeploy
+from the manager keeps the Rust daemon instead of restoring the old image.
 The source-build installer remains the normal path, including automated
 extractor setup. This alternative lets a stack manager own the containers.
 
@@ -291,8 +312,23 @@ If the manager changes the project name despite top-level `name:`, use its
 Compose-project setting to retain `pseudolife-mcp`. For a plain folder:
 
 ```bash
-docker compose --env-file .env -f docker-compose.stack.yml up -d
+docker compose --env-file .env -f docker-compose.stack.yml up -d --wait --wait-timeout 2400
 curl --fail http://127.0.0.1:8765/health
+```
+
+If the daemon's log shows `could not download` for its models (the stack's
+network has no internet access, or a proxy only the host knows), install
+them once into the models volume from the default network, then start the
+daemon again:
+
+```bash
+docker volume create --label com.docker.compose.project=pseudolife-mcp \
+  --label com.docker.compose.volume=pseudolife_rust_models pseudolife-mcp_pseudolife_rust_models
+docker run --rm -e PSEUDOLIFE_DAEMON_MODELS_DIR=/models \
+  -v pseudolife-mcp_pseudolife_rust_models:/models \
+  --entrypoint pseudolife-daemon \
+  "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:${VERSION#v}" provision models --if-missing
+docker restart pseudolife-mcp-daemon
 ```
 
 Ports remain loopback-only: Postgres on 5433 and the daemon on 8765. For
@@ -378,20 +414,22 @@ directory). Keep that env file available and identical to the manager's
 environment, especially passwords, tokens and legacy volume names.
 
 If the manager keeps its compose files inside its own container (Portainer
-commonly does), export its original stack YAML and environment to the host.
-For this unchanged stack, the retained files above are those originals:
+commonly does), update finds them missing on the host and refuses, naming
+the paths the daemon's labels record. Export the manager's original stack
+YAML and environment, put them at those exact paths on the host (the
+retained files above are the originals of this unchanged stack), then run
+the update with the env file:
 
 ```bash
-pseudolife-mcp update \
-  --compose-file "$HOME/pseudolife-stack/docker-compose.stack.yml" \
-  --env-file "$HOME/pseudolife-stack/.env"
+docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' pseudolife-mcp-daemon
+pseudolife-mcp update --env-file "$HOME/pseudolife-stack/.env"
 ```
 
-Repeat `--compose-file` for each original overlay in the original order.
-The updater retains the running project label and adds the GHCR image
-overlay. An env file alone cannot recover a missing compose file; update
-refuses that path before changing the stack. Never substitute a flattened
-or installer compose file for the manager's original configuration.
+The updater retains the running project label and adds the GHCR and Rust
+image overlays. An env file alone cannot recover a missing compose file;
+update refuses that path before changing the stack. Never substitute a
+flattened or installer compose file for the manager's original
+configuration.
 
 If the manager must perform the redeploy itself, first run the standalone
 backup below and retain the old image tag for rollback. Set
@@ -973,16 +1011,14 @@ the [native client](docs/guide/install-and-move.md#native-client), which needs
 no host Python either, and falls back to the Python client where the native
 one cannot serve the machine. Set `PSEUDOLIFE_SHIM_ENGINE=python` to install
 the Python client. This choice is independent of the daemon engine.
-A new install normally runs the Rust daemon, a small image (about 0.3 GB,
+A new install runs the Rust daemon, a small image (about 0.3 GB,
 measured 2026-11-10) that
-downloads its pinned models once (about 2.4 GB) into their own volume;
-`--engine python` (Windows: `-Engine python`) installs the Python daemon
-instead, and the installer says why when it takes Python by itself
-([Daemon engine](docs/guide/install-and-move.md)). The Python daemon image bakes
-in CPU-only torch and the embedding weights — `Qwen/Qwen3-Embedding-0.6B`
-(the default retrieval backbone since schema v25) plus `all-MiniLM-L6-v2`
-(kept baked for the ONNX-parity test path) — so it runs identically on
-Windows / macOS / Linux. Requires only Docker (with the compose v2 and
+downloads its pinned models once (about 2.4 GB) into their own volume.
+The Python daemon is retired: the installer never installs it, refuses
+`--engine python` (Windows: `-Engine python`), and moves a host still on
+it to Rust through `pseudolife-mcp update`
+([Daemon engine](docs/guide/install-and-move.md)). The daemon runs
+identically on Windows / macOS / Linux. Requires only Docker (with the compose v2 and
 buildx plugins, which Docker Desktop bundles); built once: ~5.0 GB Python
 daemon image (measured 2026-07-29 on the deployed build) + ~0.6 GB Postgres +
 ~11.8 GB extractor sidecar (measured 2026-08-20 with the v3 multi-task
@@ -1116,13 +1152,14 @@ the package in the interpreter that holds it (pip, or pipx) and restarts
 nothing: it says what to restart (a lite bank moves to Docker instead; see
 below).
 
-A Docker host that never chose a daemon engine moves to the Rust daemon on
-an update to a release that publishes its image, after the update has
-checked the configuration, downloaded the models and backed the bank up;
-if anything refuses before the backup the update continues on Python and
-says why. The scheduled `--unattended` update never changes the engine,
-`--engine python` keeps the Python daemon for good, and an update started
-from a release older than 0.23.0 moves the host on the next attended run
+A Docker host still on the retired Python daemon moves to the Rust daemon
+on its next attended update, after the update has checked the
+configuration, downloaded the models and backed the bank up; if anything
+refuses before the backup the update stops, says why, and leaves the
+Python daemon running as it was. The scheduled `--unattended` update holds
+on such a host until one attended `pseudolife-mcp update` makes the move,
+and an update started from a release older than 0.23.0 moves the host on
+the next attended run
 ([Daemon engine](docs/guide/install-and-move.md)).
 
 Docker update, backup and restore require at least **8 GiB free** on the
@@ -3811,8 +3848,10 @@ override (`memory.dream.extractor_model_override`) that wins over both
 owners while the endpoint wiring keeps its owner.
 
 *Via env:* for the Docker stack, set the override in `ops/.env` (the
-compose file interpolates it into the daemon) and restart the daemon
-(`docker compose -f ops/docker-compose.yml up -d --no-deps pseudolife-daemon`):
+compose file interpolates it into the daemon) and recreate the daemon
+(`pseudolife-mcp update --reinstall --daemon-only --tag <the running version>`
+on a release install; a checkout deploy reruns `ops/update.sh` or
+`ops/update.ps1`):
 
 ```dotenv
 # ops/.env — point dream consolidation at a local model server.
@@ -5316,8 +5355,10 @@ state volume (compose sets `PSEUDOLIFE_MCP_DATA_DIR=/data`; `docker exec
 pseudolife-mcp-daemon cat /data/config.yaml` shows it), read at startup, so
 a hand-edited value applies after the daemon restarts (`docker restart
 pseudolife-mcp-daemon`), while a `PSEUDOLIFE_MCP_TOKENS` change is an
-`ops/.env` change and needs the container recreated (`ops/update.*`, or
-`docker compose -f ops/docker-compose.yml up -d --no-deps pseudolife-daemon`).
+`ops/.env` change and needs the container recreated with the new bearer
+settings through update's explicit handover ([Changing daemon bearer
+settings](#changing-daemon-bearer-settings) gives the release and checkout
+commands).
 
 An `ops/.env` copied from a Windows host carries CRLF line endings. Compose
 reads such a file fine, but a value the shell installer read from it ended
@@ -9098,8 +9139,9 @@ says why in one line in each of these cases:
   one next step is to move the bank to the Docker tier with
   [Move a lite bank to Docker](#move-a-lite-bank-to-docker).
 - `pseudolife-mcp serve`: it does not run the memory daemon, which is the
-  Docker tier's `pseudolife-daemon`; start that with `docker compose -f
-  ops/docker-compose.yml up -d`, or install the Docker tier first.
+  Docker tier's `pseudolife-daemon`; start that with `docker start
+  pseudolife-mcp-postgres pseudolife-mcp-daemon`, or install the Docker tier
+  first.
 - `pseudolife-mcp embedded`: retired with file mode; use the Docker tier.
 - Starting a local daemon itself: the shim starts one only from
   `PSEUDOLIFE_MCP_SERVE_COMMAND`, a JSON argv array (for example
@@ -10070,7 +10112,7 @@ print.
 | `pseudolife-mcp update --tag <version>` | Use the specified published release and bypass latest-release discovery. |
 | `pseudolife-mcp update --check` | Report only. Exit 0 when a newer release exists, 3 when there is no newer eligible release, or 2 when the check fails. |
 | `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step (+ refreshing running saved tunnels), or the daemon; the steps after a newly installed shim runtime run in that runtime ([below](#the-client-steps-after-a-new-shim-runtime)). On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release; a silent or unversioned endpoint is refused, and `--daemon-only` is refused naming the daemon's host |
-| `--engine rust` / `--engine python` | Docker tier: select the daemon engine on the same bank, `/data` volume, port and bearer settings, and record the choice so later updates keep it. `--engine rust` needs a release that publishes the Rust image and refuses, before the backup, a configuration the Rust daemon does not support; `--engine python` switches back. An explicit engine change moves only the daemon, never the clients: run `pseudolife-mcp update --clients-only` afterwards if the clients are behind. Details: [Daemon engine](install-and-move.md) |
+| `--engine rust` / `--engine python` | Docker tier: select the daemon engine on the same bank, `/data` volume, port and bearer settings. In release mode only `--engine rust` is taken: the Python daemon is retired, so a release update keeps or moves a host to Rust and refuses `--engine python`. `--engine rust` needs a release that publishes the Rust image and refuses, before the backup, a configuration the Rust daemon does not support. A checkout deploy (`--checkout <repo>`) still selects either engine and records the choice. An explicit engine change moves only the daemon, never the clients: run `pseudolife-mcp update --clients-only` afterwards if the clients are behind. Details: [Daemon engine](install-and-move.md) |
 | `--reinstall` | recreate the daemon at the version it already runs, and install the shim runtime again when the current one is already that release (without it the shim step reports `current`, unless one of that runtime's installed requirements is outside the range its own `pseudolife-mcp` declares, as an mcp 2.1 runtime left by a 0.18.1 update is: then it installs again and says why); with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
 | `--allow-downgrade` | with `--tag`, allow a release older than the one the daemon runs (refused otherwise: the bank's schema may be newer than that release knows) |
 | `--env-file <path>` | the compose env file, when the one the container was created with is gone (without it the recreate would reset the Postgres password, the volume names and the bearer, so it stops instead) |
@@ -10155,6 +10197,63 @@ are behind. It prints approval steps only when Codex would ask again, and
 the check compares Codex's installed copy with the daemon just deployed,
 never with a checkout at some other commit.
 
+### A newer release runs its own update
+
+From 0.26.0, a release-mode `pseudolife-mcp update` on a Docker host first
+checks whether the target release is newer than the updater running the
+command. If it is, the newer release's own updater runs the whole update,
+daemon step included. So one run applies that release's update rules,
+including changes to how the daemon itself is updated. This covers plain,
+`--daemon-only` and `--unattended` runs. Before any backup or daemon step,
+the update:
+
+1. downloads the target's client for this platform;
+2. checks it against the release's `SHA256SUMS`;
+3. writes it to a private folder beside the shim runtimes (`.staged/`
+   under the runtimes folder), which is not a runtime;
+4. runs it with the same arguments and `--tag <target>`, under the update
+   lock the first updater holds.
+
+The output says so:
+
+```text
+release <target> is newer than this updater (<version>): its own updater, fetched and checked against the release's SHA256SUMS, runs this update
+```
+
+The newer updater prints its own steps, asks any question an attended run
+asks, and installs itself as the shim runtime in its own client step. Its
+result is the run's: its exit code, its `--json` report (with the first
+updater's line first) and the `--result-file` the first updater writes from
+it. The first updater changes nothing after it, and its folder under
+`.staged/` is removed when the run ends. The newer updater keeps the
+update lock even if the first one is killed, so no second update starts
+while it runs; on Windows the newer updater ends with the first one.
+
+When the target's client cannot be downloaded, checked or started, or
+predates this hand-off, the run says why in one line and continues on its
+own code, as before:
+
+```text
+could not fetch release <target>'s client to run this update with its own code (<why>); this update continues with <version>'s code
+```
+
+There is no hand-off:
+
+- to the release already running, or on a downgrade;
+- for `--clients-only`, `--check`, `--schedule` or `--unschedule`;
+- for a checkout deploy or a host that selected a checkout engine;
+- while a legacy import waits to be resumed;
+- on a client-only machine, whose update the client steps' own hand-off
+  (next section) already gives to the new release;
+- for an `--unattended` run whose daemon already runs the target or newer,
+  or whose daemon has `updates.unattended_daemon` off. That run has no
+  daemon step to hand over, and a daemon-only host would otherwise fetch
+  the client every night just to report nothing to do.
+
+A signal sent to the first updater's process alone (`kill <pid>`) is passed
+on to the newer one. Ctrl-C at the terminal already reaches both, so it is
+not passed on twice.
+
 ### The client steps after a new shim runtime
 
 A release-mode client update (`--clients-only`, or the client half of a
@@ -10195,6 +10294,13 @@ or earlier therefore still runs the client steps with the old code: run
 release's client-step changes. The native updater hands off the same way
 as the Python one, so a single native update run applies the new
 release's client steps.
+
+The same holds for the whole update. An updater older than 0.26.0 has no
+full hand-off, so it runs its own daemon step. On such a host,
+`pseudolife-mcp update --clients-only && pseudolife-mcp update` reaches
+the release's own daemon rules: the first command moves the client to the
+release, and the second runs that release's updater, which does the whole
+update in one run.
 
 ### Changing daemon bearer settings
 

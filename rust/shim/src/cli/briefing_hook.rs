@@ -700,7 +700,14 @@ async fn briefing(argv: &[Argument]) -> u8 {
         Ok(_) => {}
         Err(()) => return 0,
     }
-    let token = std::env::var("PSEUDOLIFE_MCP_TOKEN").ok();
+    // The token file the installers write wins over the variable, as in
+    // prompt-hook and the shim; an unusable credential sends no request.
+    let Some(credentials) = crate::credentials::CredentialProvider::from_environment()
+        .ok()
+        .and_then(|provider| provider.snapshot().ok())
+    else {
+        return 0;
+    };
     let target = if args.coordination {
         "/api/hook/coordination-start".into()
     } else if args.hook {
@@ -714,7 +721,7 @@ async fn briefing(argv: &[Argument]) -> u8 {
     let Some(body) = get(
         &url,
         &target,
-        token.as_deref(),
+        credentials.token(),
         Duration::from_secs(if args.coordination { 2 } else { 5 }),
         false,
     )

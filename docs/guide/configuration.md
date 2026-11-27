@@ -40,8 +40,10 @@ state volume (compose sets `PSEUDOLIFE_MCP_DATA_DIR=/data`; `docker exec
 pseudolife-mcp-daemon cat /data/config.yaml` shows it), read at startup, so
 a hand-edited value applies after the daemon restarts (`docker restart
 pseudolife-mcp-daemon`), while a `PSEUDOLIFE_MCP_TOKENS` change is an
-`ops/.env` change and needs the container recreated (`ops/update.*`, or
-`docker compose -f ops/docker-compose.yml up -d --no-deps pseudolife-daemon`).
+`ops/.env` change and needs the container recreated with the new bearer
+settings through update's explicit handover ([Changing daemon bearer
+settings](#changing-daemon-bearer-settings) gives the release and checkout
+commands).
 
 An `ops/.env` copied from a Windows host carries CRLF line endings. Compose
 reads such a file fine, but a value the shell installer read from it ended
@@ -3822,8 +3824,9 @@ says why in one line in each of these cases:
   one next step is to move the bank to the Docker tier with
   [Move a lite bank to Docker](#move-a-lite-bank-to-docker).
 - `pseudolife-mcp serve`: it does not run the memory daemon, which is the
-  Docker tier's `pseudolife-daemon`; start that with `docker compose -f
-  ops/docker-compose.yml up -d`, or install the Docker tier first.
+  Docker tier's `pseudolife-daemon`; start that with `docker start
+  pseudolife-mcp-postgres pseudolife-mcp-daemon`, or install the Docker tier
+  first.
 - `pseudolife-mcp embedded`: retired with file mode; use the Docker tier.
 - Starting a local daemon itself: the shim starts one only from
   `PSEUDOLIFE_MCP_SERVE_COMMAND`, a JSON argv array (for example
@@ -4794,7 +4797,7 @@ print.
 | `pseudolife-mcp update --tag <version>` | Use the specified published release and bypass latest-release discovery. |
 | `pseudolife-mcp update --check` | Report only. Exit 0 when a newer release exists, 3 when there is no newer eligible release, or 2 when the check fails. |
 | `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step (+ refreshing running saved tunnels), or the daemon; the steps after a newly installed shim runtime run in that runtime ([below](#the-client-steps-after-a-new-shim-runtime)). On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release; a silent or unversioned endpoint is refused, and `--daemon-only` is refused naming the daemon's host |
-| `--engine rust` / `--engine python` | Docker tier: select the daemon engine on the same bank, `/data` volume, port and bearer settings, and record the choice so later updates keep it. `--engine rust` needs a release that publishes the Rust image and refuses, before the backup, a configuration the Rust daemon does not support; `--engine python` switches back. An explicit engine change moves only the daemon, never the clients: run `pseudolife-mcp update --clients-only` afterwards if the clients are behind. Details: [Daemon engine](install-and-move.md) |
+| `--engine rust` / `--engine python` | Docker tier: select the daemon engine on the same bank, `/data` volume, port and bearer settings. In release mode only `--engine rust` is taken: the Python daemon is retired, so a release update keeps or moves a host to Rust and refuses `--engine python`. `--engine rust` needs a release that publishes the Rust image and refuses, before the backup, a configuration the Rust daemon does not support. A checkout deploy (`--checkout <repo>`) still selects either engine and records the choice. An explicit engine change moves only the daemon, never the clients: run `pseudolife-mcp update --clients-only` afterwards if the clients are behind. Details: [Daemon engine](install-and-move.md) |
 | `--reinstall` | recreate the daemon at the version it already runs, and install the shim runtime again when the current one is already that release (without it the shim step reports `current`, unless one of that runtime's installed requirements is outside the range its own `pseudolife-mcp` declares, as an mcp 2.1 runtime left by a 0.18.1 update is: then it installs again and says why); with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
 | `--allow-downgrade` | with `--tag`, allow a release older than the one the daemon runs (refused otherwise: the bank's schema may be newer than that release knows) |
 | `--env-file <path>` | the compose env file, when the one the container was created with is gone (without it the recreate would reset the Postgres password, the volume names and the bearer, so it stops instead) |
@@ -4879,6 +4882,63 @@ are behind. It prints approval steps only when Codex would ask again, and
 the check compares Codex's installed copy with the daemon just deployed,
 never with a checkout at some other commit.
 
+### A newer release runs its own update
+
+From 0.26.0, a release-mode `pseudolife-mcp update` on a Docker host first
+checks whether the target release is newer than the updater running the
+command. If it is, the newer release's own updater runs the whole update,
+daemon step included. So one run applies that release's update rules,
+including changes to how the daemon itself is updated. This covers plain,
+`--daemon-only` and `--unattended` runs. Before any backup or daemon step,
+the update:
+
+1. downloads the target's client for this platform;
+2. checks it against the release's `SHA256SUMS`;
+3. writes it to a private folder beside the shim runtimes (`.staged/`
+   under the runtimes folder), which is not a runtime;
+4. runs it with the same arguments and `--tag <target>`, under the update
+   lock the first updater holds.
+
+The output says so:
+
+```text
+release <target> is newer than this updater (<version>): its own updater, fetched and checked against the release's SHA256SUMS, runs this update
+```
+
+The newer updater prints its own steps, asks any question an attended run
+asks, and installs itself as the shim runtime in its own client step. Its
+result is the run's: its exit code, its `--json` report (with the first
+updater's line first) and the `--result-file` the first updater writes from
+it. The first updater changes nothing after it, and its folder under
+`.staged/` is removed when the run ends. The newer updater keeps the
+update lock even if the first one is killed, so no second update starts
+while it runs; on Windows the newer updater ends with the first one.
+
+When the target's client cannot be downloaded, checked or started, or
+predates this hand-off, the run says why in one line and continues on its
+own code, as before:
+
+```text
+could not fetch release <target>'s client to run this update with its own code (<why>); this update continues with <version>'s code
+```
+
+There is no hand-off:
+
+- to the release already running, or on a downgrade;
+- for `--clients-only`, `--check`, `--schedule` or `--unschedule`;
+- for a checkout deploy or a host that selected a checkout engine;
+- while a legacy import waits to be resumed;
+- on a client-only machine, whose update the client steps' own hand-off
+  (next section) already gives to the new release;
+- for an `--unattended` run whose daemon already runs the target or newer,
+  or whose daemon has `updates.unattended_daemon` off. That run has no
+  daemon step to hand over, and a daemon-only host would otherwise fetch
+  the client every night just to report nothing to do.
+
+A signal sent to the first updater's process alone (`kill <pid>`) is passed
+on to the newer one. Ctrl-C at the terminal already reaches both, so it is
+not passed on twice.
+
 ### The client steps after a new shim runtime
 
 A release-mode client update (`--clients-only`, or the client half of a
@@ -4919,6 +4979,13 @@ or earlier therefore still runs the client steps with the old code: run
 release's client-step changes. The native updater hands off the same way
 as the Python one, so a single native update run applies the new
 release's client steps.
+
+The same holds for the whole update. An updater older than 0.26.0 has no
+full hand-off, so it runs its own daemon step. On such a host,
+`pseudolife-mcp update --clients-only && pseudolife-mcp update` reaches
+the release's own daemon rules: the first command moves the client to the
+release, and the second runs that release's updater, which does the whole
+update in one run.
 
 ### Changing daemon bearer settings
 

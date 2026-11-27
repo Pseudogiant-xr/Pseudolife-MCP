@@ -16,8 +16,21 @@ DAEMON = "pseudolife-daemon"
 EXTRACTOR = "pseudolife-extractor"
 
 
+class _ComposeLoader(yaml.SafeLoader):
+    """Safe YAML plus Compose's ``!reset`` merge tag (the Rust overlay's
+    ``build: !reset null``), read as the value it resets to."""
+
+
+_ComposeLoader.add_constructor("!reset", lambda loader, node: None)
+
+
 def load(path):
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    return yaml.load(path.read_text(encoding="utf-8"), Loader=_ComposeLoader)
+
+
+def release_version():
+    import tomllib
+    return tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
 
 
 def expected_stack():
@@ -41,6 +54,24 @@ def expected_stack():
         "PSEUDOLIFE_DREAM_BASE_URL": "${PSEUDOLIFE_DREAM_BASE_URL:-}",
         "PSEUDOLIFE_DREAM_EXTRACTOR_MODE": "${PSEUDOLIFE_DREAM_EXTRACTOR_MODE:-primary}",
     })
+    # The Rust release overlay the updater applies: the stack runs the Rust
+    # daemon (the Python daemon is retired). Every setting of the overlay is
+    # accounted for here, so a new one cannot be silently lost.
+    rust = load(ROOT / "ops/docker-compose.rust-ghcr.yml")
+    assert set(rust) == {"services", "volumes"}, "unhandled Rust overlay top-level settings"
+    assert set(rust["services"]) == {DAEMON, EXTRACTOR}, "unhandled Rust overlay services"
+    overlay = rust["services"][DAEMON]
+    assert set(overlay) == {"pull_policy", "build", "image", "labels", "environment", "volumes"},         "unhandled Rust overlay runtime settings"
+    # The overlay requires an explicit tag the updater supplies; the stack is
+    # pasted by hand, so it defaults to this release, which the cut moves.
+    image, _ = overlay["image"].split(":${", 1)
+    daemon["image"] = f"{image}:${{PSEUDOLIFE_IMAGE_TAG:-{release_version()}}}"
+    # A pinned version needs no re-pull on every redeploy, and the stack builds nothing.
+    assert overlay["pull_policy"] == "always" and overlay["build"] is None
+    daemon["labels"] = dict(overlay["labels"])
+    daemon["environment"].update(overlay["environment"])
+    daemon["volumes"] = [*daemon["volumes"], *overlay["volumes"]]
+    expected["volumes"].update(rust["volumes"])
     return expected
 
 
@@ -71,6 +102,9 @@ def test_stack_matches_every_upstream_runtime_setting():
         assert service["image"].startswith("ghcr.io/pseudogiant-xr/")
         assert not ({"build", "extends", "env_file"} & service.keys())
     assert "include" not in stack
+    # The Rust daemon, labelled as the updater recognises it.
+    assert stack["services"][DAEMON]["image"].startswith("ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:")
+    assert stack["services"][DAEMON]["labels"] == {"org.pseudolife.engine": "rust"}
 
 
 def test_opt_in_sidecar_accounts_for_the_remaining_upstream_service():

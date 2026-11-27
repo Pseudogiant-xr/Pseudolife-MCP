@@ -236,9 +236,19 @@ fn the_runtime_answers_the_hand_off_probe() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(0), "{}", text(&output));
+    // Its version, then the protocols it accepts as a child on one line:
+    // client-handoff-v1, the steps after a new shim runtime (a client
+    // update's plugin, Codex and tunnel steps), and full-update-v1, the whole
+    // release-mode update a newer release's updater is handed before any
+    // daemon step. The Python parents (update_cli.py, update_bridge.py)
+    // split the line and look for client-handoff-v1, so a second token
+    // leaves them as they were.
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
-        format!("{}\nclient-handoff-v1\n", env!("CARGO_PKG_VERSION"))
+        format!(
+            "{}\nclient-handoff-v1 full-update-v1\n",
+            env!("CARGO_PKG_VERSION")
+        )
     );
     // The probe a parent runs first, which every native updater answers.
     let output = home

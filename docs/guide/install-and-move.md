@@ -17,30 +17,37 @@ release publishes: it checks free disk space, pulls that image and
 downloads the pinned models (about 2.4 GB, once, into their own
 `pseudolife_rust_models` volume, which stays out of every backup) before
 any container starts, and records the selection once the daemon reports ready at that
-release. With no `--engine`, the install takes the Python daemon instead,
-saying why, when it has no bearer token (`--no-token`, `--transport http`
-with no token set, or a Python-client install on a host that cannot
-install the shim and so mints none), when the release publishes no Rust image or its models cannot be
-downloaded, or when the bank already exists
-(the next attended `pseudolife-mcp update` moves that bank, after its own
-checks). `ops/install.sh --engine python` (Windows: `ops/install.ps1
--Engine python`) chooses Python and records that choice, so later updates
-keep it. `--engine rust` names Rust explicitly: without a bearer, image or
-models it refuses, names `--engine python`, and starts nothing; for a bank
-that already exists it installs on Python and then switches through update
+release. The Python daemon is retired, so no install takes it: without a
+bearer token (`--no-token`, `--transport http` with no token set, or a
+Python-client install on a host that cannot install the shim and so mints
+none), or when the release publishes no Rust image or its models cannot
+be downloaded, the install refuses with the cause and its fix and starts
+nothing, and `--engine python` (Windows: `-Engine python`) is refused. A
+bank that already exists, or a host still on the Python daemon, comes up
+as it is and is then moved to Rust by `pseudolife-mcp update`, which
+checks the bank first; `--engine rust` names the same engine explicitly
+and switches through update
 (below).
 
-A release-mode `pseudolife-mcp update` moves a Docker host that never
-chose an engine to the Rust daemon when the target release publishes its
-image. An ordinary update can move the host from a script, an SSH command
-or an agent's shell too. Before it downloads the models or backs
-anything up, the update asks the Rust image whether it supports this bank's configuration (`pseudolife-daemon
-check-config`: a non-default reranker or embedding model, for instance, is
-not). If that check, or anything else before the backup, refuses, the update
-removes what it pulled for the move, warns with the refusal and its fix,
-and continues on Python; nothing is recorded, so the next update tries
-again. `--engine python` keeps Python for good, and `--engine rust` refuses
-an unsupported configuration before the backup instead of falling back.
+A release-mode `pseudolife-mcp update` moves a Docker host still on the
+Python daemon to the Rust daemon: the Python daemon is retired and gets no
+more fixes, so no release update keeps it, whatever an earlier
+`--engine python` recorded. An ordinary update makes the move from a
+script, an SSH command or an agent's shell too. Before it downloads the
+models or backs anything up, the update asks the Rust image whether it
+supports this bank's configuration (`pseudolife-daemon check-config`: a
+non-default reranker or embedding model, for instance, is not). If that
+check, or anything else before the backup, refuses, the update removes what
+it pulled for the move and stops with the refusal and its fix; the Python
+daemon keeps running as it was, and the next update tries again once the
+cause is fixed. A release that publishes no Rust image is refused the same
+way. The scheduled `--unattended` update does not make the move: on a
+Python host it holds and asks for one attended `pseudolife-mcp update`.
+`--no-backup` is refused on a Python host, and `--engine python` is refused
+in release mode (a checkout deploy still takes it). The one run that stays
+on Python is the explicit bearer handover (`--allow-auth-change`): the move
+needs a bearer, so a Python daemon that runs without one first gets it that
+way, and the next attended update moves the host.
 The updater that deploys the daemon is the one already installed, so an
 update started from a release older than 0.23.0 installs the new release
 on the Python daemon. The next attended `pseudolife-mcp update` can move
@@ -208,7 +215,21 @@ message, then rerun the original installer:
 Use [`ops/docker-compose.stack.yml`](../../ops/docker-compose.stack.yml)
 unchanged with Portainer, Dockge, Komodo, or a plain Docker Compose folder.
 It is self-contained: two GHCR images, no local builds, includes, or overlays.
-This is a Docker Compose deployment, not a Swarm stack.
+This is a Docker Compose deployment, not a Swarm stack. Its daemon is the
+Rust daemon, pinned by default to the release the file comes from; on
+first start it downloads its pinned models (about 2.4 GB, once) into the
+`pseudolife_rust_models` volume, which stays out of every backup.
+
+A stack deployed from an earlier release's file may still run the retired
+Python daemon. Move it with `pseudolife-mcp update` on the Docker host
+(["Updates, backups and names to preserve"](#updates-backups-and-names-to-preserve)
+gives the command): it backs the bank up, checks the configuration against
+the Rust image, finishes any legacy import and only then recreates the
+daemon. Do not move it by pasting the new file over the old stack in the
+manager, which swaps the engine with none of those steps. Once the update
+reports the Rust daemon healthy, replace the stack in the manager with this
+release's file (same project name and env file), so that a later redeploy
+from the manager keeps the Rust daemon instead of restoring the old image.
 The source-build installer remains the normal path, including automated
 extractor setup. This alternative lets a stack manager own the containers.
 
@@ -285,8 +306,23 @@ If the manager changes the project name despite top-level `name:`, use its
 Compose-project setting to retain `pseudolife-mcp`. For a plain folder:
 
 ```bash
-docker compose --env-file .env -f docker-compose.stack.yml up -d
+docker compose --env-file .env -f docker-compose.stack.yml up -d --wait --wait-timeout 2400
 curl --fail http://127.0.0.1:8765/health
+```
+
+If the daemon's log shows `could not download` for its models (the stack's
+network has no internet access, or a proxy only the host knows), install
+them once into the models volume from the default network, then start the
+daemon again:
+
+```bash
+docker volume create --label com.docker.compose.project=pseudolife-mcp \
+  --label com.docker.compose.volume=pseudolife_rust_models pseudolife-mcp_pseudolife_rust_models
+docker run --rm -e PSEUDOLIFE_DAEMON_MODELS_DIR=/models \
+  -v pseudolife-mcp_pseudolife_rust_models:/models \
+  --entrypoint pseudolife-daemon \
+  "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:${VERSION#v}" provision models --if-missing
+docker restart pseudolife-mcp-daemon
 ```
 
 Ports remain loopback-only: Postgres on 5433 and the daemon on 8765. For
@@ -372,20 +408,22 @@ directory). Keep that env file available and identical to the manager's
 environment, especially passwords, tokens and legacy volume names.
 
 If the manager keeps its compose files inside its own container (Portainer
-commonly does), export its original stack YAML and environment to the host.
-For this unchanged stack, the retained files above are those originals:
+commonly does), update finds them missing on the host and refuses, naming
+the paths the daemon's labels record. Export the manager's original stack
+YAML and environment, put them at those exact paths on the host (the
+retained files above are the originals of this unchanged stack), then run
+the update with the env file:
 
 ```bash
-pseudolife-mcp update \
-  --compose-file "$HOME/pseudolife-stack/docker-compose.stack.yml" \
-  --env-file "$HOME/pseudolife-stack/.env"
+docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' pseudolife-mcp-daemon
+pseudolife-mcp update --env-file "$HOME/pseudolife-stack/.env"
 ```
 
-Repeat `--compose-file` for each original overlay in the original order.
-The updater retains the running project label and adds the GHCR image
-overlay. An env file alone cannot recover a missing compose file; update
-refuses that path before changing the stack. Never substitute a flattened
-or installer compose file for the manager's original configuration.
+The updater retains the running project label and adds the GHCR and Rust
+image overlays. An env file alone cannot recover a missing compose file;
+update refuses that path before changing the stack. Never substitute a
+flattened or installer compose file for the manager's original
+configuration.
 
 If the manager must perform the redeploy itself, first run the standalone
 backup below and retain the old image tag for rollback. Set

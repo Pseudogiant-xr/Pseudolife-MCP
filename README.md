@@ -534,16 +534,14 @@ the [native client](docs/guide/install-and-move.md#native-client), which needs
 no host Python either, and falls back to the Python client where the native
 one cannot serve the machine. Set `PSEUDOLIFE_SHIM_ENGINE=python` to install
 the Python client. This choice is independent of the daemon engine.
-A new install normally runs the Rust daemon, a small image (about 0.3 GB,
+A new install runs the Rust daemon, a small image (about 0.3 GB,
 measured 2026-11-10) that
-downloads its pinned models once (about 2.4 GB) into their own volume;
-`--engine python` (Windows: `-Engine python`) installs the Python daemon
-instead, and the installer says why when it takes Python by itself
-([Daemon engine](docs/guide/install-and-move.md)). The Python daemon image bakes
-in CPU-only torch and the embedding weights — `Qwen/Qwen3-Embedding-0.6B`
-(the default retrieval backbone since schema v25) plus `all-MiniLM-L6-v2`
-(kept baked for the ONNX-parity test path) — so it runs identically on
-Windows / macOS / Linux. Requires only Docker (with the compose v2 and
+downloads its pinned models once (about 2.4 GB) into their own volume.
+The Python daemon is retired: the installer never installs it, refuses
+`--engine python` (Windows: `-Engine python`), and moves a host still on
+it to Rust through `pseudolife-mcp update`
+([Daemon engine](docs/guide/install-and-move.md)). The daemon runs
+identically on Windows / macOS / Linux. Requires only Docker (with the compose v2 and
 buildx plugins, which Docker Desktop bundles); built once: ~5.0 GB Python
 daemon image (measured 2026-07-29 on the deployed build) + ~0.6 GB Postgres +
 ~11.8 GB extractor sidecar (measured 2026-08-20 with the v3 multi-task
@@ -677,13 +675,14 @@ the package in the interpreter that holds it (pip, or pipx) and restarts
 nothing: it says what to restart (a lite bank moves to Docker instead; see
 below).
 
-A Docker host that never chose a daemon engine moves to the Rust daemon on
-an update to a release that publishes its image, after the update has
-checked the configuration, downloaded the models and backed the bank up;
-if anything refuses before the backup the update continues on Python and
-says why. The scheduled `--unattended` update never changes the engine,
-`--engine python` keeps the Python daemon for good, and an update started
-from a release older than 0.23.0 moves the host on the next attended run
+A Docker host still on the retired Python daemon moves to the Rust daemon
+on its next attended update, after the update has checked the
+configuration, downloaded the models and backed the bank up; if anything
+refuses before the backup the update stops, says why, and leaves the
+Python daemon running as it was. The scheduled `--unattended` update holds
+on such a host until one attended `pseudolife-mcp update` makes the move,
+and an update started from a release older than 0.23.0 moves the host on
+the next attended run
 ([Daemon engine](docs/guide/install-and-move.md)).
 
 Docker update, backup and restore require at least **8 GiB free** on the

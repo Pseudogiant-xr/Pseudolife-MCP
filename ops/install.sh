@@ -59,12 +59,10 @@
 #   --agents-file <path>             standing-file target for generic agents
 #   --no-art                         plain output (no banner, no color)
 #   --no-token                       open-loopback install: mint no bearer
-#   --engine rust|python             the Docker daemon: rust pulls the release's
-#                                    published Rust image; a rerun keeps the
-#                                    engine installed (default for a new
-#                                    install: rust, or python without a bearer
-#                                    or a published image); naming the other engine
-#                                    switches it through pseudolife-mcp update
+#   --engine rust                    the Docker daemon: the release's published
+#                                    Rust image, the default (the Python daemon
+#                                    is retired; a host still on it moves to
+#                                    Rust through pseudolife-mcp update)
 #   --tunnel                         enter optional guided ChatGPT Secure MCP
 #                                    Tunnel setup after local installation
 #                                    token, so the agent board stays off
@@ -1030,8 +1028,9 @@ esac
 # After every client-only inference (--daemon-url, the environment, the
 # bank question), so an implied client-only install refuses it too.
 case "$ENGINE" in
-    ""|rust|python) ;;
-    *) echo "--engine must be rust or python; nothing was changed." >&2; exit 2 ;;
+    ""|rust) ;;
+    python) echo "--engine python is retired: the Python daemon gets no more fixes, so this installer runs the Rust daemon and moves a host still on Python to it. Drop --engine python. Nothing was changed." >&2; exit 2 ;;
+    *) echo "--engine must be rust; nothing was changed." >&2; exit 2 ;;
 esac
 if [ -n "$ENGINE" ] && [ -n "$CLIENT_ONLY" ]; then
     echo "--engine selects this host's Docker daemon, and a client-only install runs none; drop --engine, or run the installer on the daemon's host. Nothing was changed." >&2
@@ -1045,7 +1044,7 @@ if [ -n "$NO_TOKEN" ] || { [ "$TRANSPORT" = http ] && [ -z "${PSEUDOLIFE_MCP_TOK
     RUST_BEARER=""
 fi
 if [ "$ENGINE" = rust ] && [ -z "$RUST_BEARER" ]; then
-    echo "--engine rust needs the daemon's bearer token: pseudolife-mcp update verifies the Rust daemon with an authenticated read, and this install would mint none (--no-token, or --transport http with no token in ops/.env). Drop that option or use --engine python. Nothing was changed." >&2
+    echo "--engine rust needs the daemon's bearer token: pseudolife-mcp update verifies the Rust daemon with an authenticated read, and this install would mint none (--no-token, or --transport http with no token in ops/.env). Drop that option. Nothing was changed." >&2
     exit 2
 fi
 # <<< engine flag <<<
@@ -1493,18 +1492,15 @@ sys.exit(1 if sys.prefix == sys.base_prefix and os.path.exists(marker) else 0)' 
 }
 # <<< shim tooling <<<
 # >>> bearer refusal ways >>>
-# How the bearer refusals (stage 4b and stage 5b) end. An accepted Rust
-# install keeps its engine (--engine python only schedules the switch), so a
-# Python rerun is offered only without one; where --engine python scheduled
-# the switch, the refusal says what the switch needs: pseudolife-mcp update
-# makes it from the shim, and reads the Rust daemon with its bearer first.
+# How the bearer refusals (stage 4b and stage 5b) end. The Python daemon is
+# retired, so no refusal offers it; where a host still on Python moves to
+# Rust after the install, the refusal says what that move needs:
+# pseudolife-mcp update makes it from the shim and verifies the Rust daemon
+# with the token.
 engine_switch_way() {
-    python_way="; or rerun with --engine python"
     switch_way=""
-    [ "${INSTALLED_ENGINE:-}" = rust ] || return 0
-    python_way=""
-    [ "${SWITCH_ENGINE:-}" = python ] || return 0
-    switch_way=" Switching to the Python daemon needs that token too, and the shim (pipx or a pip-capable Python >= 3.10), because pseudolife-mcp update makes the switch and reads the Rust daemon with the token first: with both in place, rerun with --engine python and the install switches this host after it."
+    [ "${SWITCH_ENGINE:-}" = rust ] || return 0
+    switch_way=" This host moves to the Rust daemon after the install, and that move needs the token too, and the shim (pipx or a pip-capable Python >= 3.10)."
 }
 # <<< bearer refusal ways <<<
 # >>> daemon engine >>>
@@ -1516,63 +1512,58 @@ rust_token_expected() {
     [ -n "$(get_env PSEUDOLIFE_MCP_TOKEN)$(get_env PSEUDOLIFE_MCP_TOKENS)" ] && return 0
     [ "$TRANSPORT" = shim ] && shim_tooling_ready
 }
-# The engine already installed is kept; a new install takes --engine (default
-# rust since G2, python without a bearer or an available Rust image). Naming the other engine on an existing bank switches it after the
-# install through pseudolife-mcp update (backup, rollback tag, health gate).
+# The Python daemon is retired (maintainer, 27 November 2026): a new install
+# runs Rust, and a bank that already exists or a host still on Python is
+# brought up as it is and then moved to Rust after the install through
+# pseudolife-mcp update (backup, rollback tag, health gate), which checks its
+# schema and counters first. Without a bearer to come the install refuses.
 # Rust pulls the release's image and provisions its models into their own
 # volume here, before any container starts, so a refusal starts nothing.
 engine_helper() { "$(installer_python)" "$repo/ops/installer_engine.py" "$@"; }
 INSTALLED_ENGINE=""
 COMPOSE_ENGINE=""
 SWITCH_ENGINE=""
-ENGINE_DEFAULTED=""
 engine_files=()
 if [ -z "$CLIENT_ONLY" ]; then
     INSTALLED_ENGINE="$(engine_helper detect --repo "$repo")" || exit 1
     case "$INSTALLED_ENGINE" in
         none)
-            # Rust is the default since G2; without a bearer the default stays Python.
-            if [ -n "$ENGINE" ]; then COMPOSE_ENGINE="$ENGINE"
-            elif [ -n "${BANK_EXISTED:-}" ]; then
-                # An existing bank moves only through update's checks, which its
-                # own default does on the next attended update.
-                COMPOSE_ENGINE=python
-                step "Daemon engine: python for this existing bank; the next attended pseudolife-mcp update moves it to Rust after its checks"
-            elif rust_token_expected; then COMPOSE_ENGINE=rust; ENGINE_DEFAULTED=1
-            else COMPOSE_ENGINE=python; step "Daemon engine: python (no bearer token for the default Rust daemon)"; fi
             # An existing bank reaches Rust only through update, which checks
             # its schema and counters first.
-            if [ "$COMPOSE_ENGINE" = rust ] && [ -n "${BANK_EXISTED:-}" ]; then
-                COMPOSE_ENGINE=python; SWITCH_ENGINE=rust
-            fi ;;
-        # This checkout's own unfinished Rust install: redo it, or install Python.
-        rust-unaccepted) COMPOSE_ENGINE="${ENGINE:-rust}" ;;
-        *)
-            COMPOSE_ENGINE="$INSTALLED_ENGINE"
-            if [ -n "$ENGINE" ] && [ "${INSTALLED_ENGINE%-checkout}" != "$ENGINE" ]; then SWITCH_ENGINE="$ENGINE"; fi ;;
+            if [ -n "${BANK_EXISTED:-}" ]; then COMPOSE_ENGINE=python; SWITCH_ENGINE=rust
+            else COMPOSE_ENGINE=rust; fi ;;
+        # This checkout's own unfinished Rust install: redo it.
+        rust-unaccepted) COMPOSE_ENGINE=rust ;;
+        # A host still on the retired Python daemon moves after the install.
+        python) COMPOSE_ENGINE=python; SWITCH_ENGINE=rust ;;
+        *) COMPOSE_ENGINE="$INSTALLED_ENGINE" ;;
     esac
-    # Before anything is pulled: Rust with no bearer to come refuses here.
-    if [ "$COMPOSE_ENGINE" = rust ] && [ -z "${ENGINE_DEFAULTED:-}" ] && ! rust_token_expected; then
+    # Before anything is pulled: Rust now or after the install, with no
+    # bearer to come, refuses here.
+    if { [ "$COMPOSE_ENGINE" = rust ] || [ "$SWITCH_ENGINE" = rust ]; } && ! rust_token_expected; then
         # Another release's unfinished Rust container is refused by prepare
         # whatever the token, so its refusal comes first: no fix below passes it.
         if [ "$INSTALLED_ENGINE" = rust-unaccepted ]; then engine_helper foreign --repo "$repo" || exit 1; fi
         engine_switch_way
         if [ -z "$RUST_BEARER" ]; then
-            echo "The Rust daemon needs its bearer token, and this install cannot mint one (--no-token, or --transport http, whose registrations cannot carry a token file): rerun with --transport shim and without --no-token, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and rerun without --no-token$python_way.$switch_way Nothing was pulled or started." >&2
+            echo "The Rust daemon needs its bearer token, and this install cannot mint one (--no-token, or --transport http, whose registrations cannot carry a token file): rerun with --transport shim and without --no-token, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and rerun without --no-token.$switch_way Nothing was pulled or started." >&2
         else
-            echo "The Rust daemon needs its bearer token, and this install cannot mint one (no pipx or pip-capable Python >= 3.10 to install the shim): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx, then rerun$python_way.$switch_way Nothing was pulled or started." >&2
+            echo "The Rust daemon needs its bearer token, and this install cannot mint one (no pipx or pip-capable Python >= 3.10 to install the shim): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx, then rerun.$switch_way Nothing was pulled or started." >&2
         fi
         exit 2
     fi
-    default_args=()
-    [ -z "${ENGINE_DEFAULTED:-}" ] || default_args=(--default)
-    engine_out="$(engine_helper prepare --repo "$repo" --engine "$COMPOSE_ENGINE" ${default_args[@]+"${default_args[@]}"})" || exit 1
+    # An unavailable Rust image or models refuse here with the helper's own
+    # cause and fix; nothing falls back to Python.
+    engine_out="$(engine_helper prepare --repo "$repo" --engine "$COMPOSE_ENGINE")" || exit 1
     while IFS= read -r engine_file; do
         [ -z "$engine_file" ] || engine_files+=("$engine_file")
     done <<< "$engine_out"
-    # A defaulted Rust install whose image or models are unavailable falls back
-    # to Python (the helper said why); an explicit --engine rust refused above.
-    if [ "$COMPOSE_ENGINE" = rust ] && [ ${#engine_files[@]} -eq 0 ]; then COMPOSE_ENGINE=python; fi
+    # A Rust engine always comes with its overlay; without one the base file
+    # would start the retired Python image, so the install stops instead.
+    if [ "$COMPOSE_ENGINE" = rust ] && [ ${#engine_files[@]} -eq 0 ]; then
+        echo "The engine step (ops/installer_engine.py) prepared no Rust daemon overlay, so this install would start the retired Python daemon; update this checkout to a release (git checkout v<version>) and rerun. Nothing was started." >&2
+        exit 1
+    fi
     if [ -n "$SWITCH_ENGINE" ]; then step "Daemon engine: ${COMPOSE_ENGINE%-checkout} for now; switching to $SWITCH_ENGINE after the install"
     elif [ "$INSTALLED_ENGINE" = none ] || [ "$INSTALLED_ENGINE" = rust-unaccepted ]; then step "Daemon engine: ${COMPOSE_ENGINE%-checkout}"
     else step "Daemon engine unchanged: ${COMPOSE_ENGINE%-checkout}"; fi
@@ -1723,17 +1714,11 @@ fi
 # The default Rust daemon is verified with an authenticated read, so it
 # follows the bearer this stage actually produced, not the one stage 4b
 # predicted (a host that cannot install the shim mints none).
-if [ "${COMPOSE_ENGINE:-}" = rust ] && [ "$TOKEN_STATE" != minted ] && [ "$TOKEN_STATE" != present ]; then
-    if [ -n "${ENGINE_DEFAULTED:-}" ]; then
-        COMPOSE_ENGINE=python
-        engine_files=()
-        step "Daemon engine: python after all (no bearer token for the default Rust daemon: $TOKEN_STATE)"
-    else
-        # As at stage 4b (the bearer refusal ways).
-        engine_switch_way
-        echo "The Rust daemon needs its bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun$python_way.$switch_way The daemon was not started; the Rust image and models stay downloaded for the rerun." >&2
-        exit 2
-    fi
+if { [ "${COMPOSE_ENGINE:-}" = rust ] || [ "${SWITCH_ENGINE:-}" = rust ]; } && [ "$TOKEN_STATE" != minted ] && [ "$TOKEN_STATE" != present ]; then
+    # As at stage 4b (the bearer refusal ways).
+    engine_switch_way
+    echo "The Rust daemon needs its bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun.$switch_way Nothing was started; any Rust image and models already downloaded stay for the rerun." >&2
+    exit 2
 fi
 # <<< engine token <<<
 
@@ -3682,9 +3667,6 @@ if [ -z "$CLIENT_ONLY" ]; then
         # Recorded only now, as update records its own after its health gate.
         engine_status="$(engine_helper accept)" || exit 1
         [ "$engine_status" != accepted ] || step "Rust daemon selection recorded; pseudolife-mcp update keeps it"
-    elif [ "${ENGINE:-}" = python ]; then
-        # Kept by later updates too: the G2 default never moves a chosen host.
-        engine_helper choose --engine python >/dev/null || exit 1
     fi
     # <<< engine record <<<
     endpoint_container_probe
@@ -3896,18 +3878,18 @@ if [ -n "${SWITCH_ENGINE:-}" ]; then
     if [ -n "$switch_version" ]; then switch_args+=(--tag "$switch_version")
     else
         # Without --tag, update would move to the newest release instead.
-        echo "The installed daemon was kept: its version could not be read from http://127.0.0.1:8765/health, so the switch to $SWITCH_ENGINE did not run. Run: pseudolife-mcp update --engine $SWITCH_ENGINE --daemon-only --tag <the daemon's version>" >&2
+        echo "The installed daemon (still the retired Python daemon) was kept: its version could not be read from http://127.0.0.1:8765/health, so the switch to $SWITCH_ENGINE did not run. Run: pseudolife-mcp update --engine $SWITCH_ENGINE --daemon-only --tag <the daemon's version>" >&2
         exit 1
     fi
     ensure_shim
     if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
-        echo "The installed daemon was kept; switching it to $SWITCH_ENGINE needs the pseudolife-mcp shim, which is unavailable (see above). Run: pseudolife-mcp ${switch_args[*]}" >&2
+        echo "The installed daemon (still the retired Python daemon) was kept; switching it to $SWITCH_ENGINE needs the pseudolife-mcp shim, which is unavailable (see above). Run: pseudolife-mcp ${switch_args[*]}" >&2
         exit 1
     fi
     step "Switching the daemon to $SWITCH_ENGINE (backup, rollback tag and health gate)..."
     # Stdin closed: update's own questions take their defaults, never hang.
     if ! "$SHIM_PATH" "${switch_args[@]}" </dev/null; then
-        echo "The switch to $SWITCH_ENGINE failed; its output above says what changed and how to roll back. Retry with: $SHIM_PATH ${switch_args[*]}" >&2
+        echo "The switch to $SWITCH_ENGINE failed, so this host still runs the retired Python daemon; its output above says what changed and how to roll back. Retry with: $SHIM_PATH ${switch_args[*]}" >&2
         exit 1
     fi
 fi

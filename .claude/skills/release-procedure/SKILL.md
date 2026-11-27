@@ -1,6 +1,6 @@
 ---
 name: release-procedure
-description: Use when cutting a release or publishing anything to a public surface — GitHub release, PyPI, the MCP registry, the GHCR container images, or the Claude Code plugin marketplace. Covers the docs currency pass, the seven-file version cut, build/inspect, the Trusted Publishing + registry + image automation, and verification.
+description: Use when cutting a release or publishing anything to a public surface — GitHub release, PyPI, the MCP registry, the GHCR container images, or the Claude Code plugin marketplace. Covers the docs currency pass, the eight-file version cut, build/inspect, the Trusted Publishing + registry + image automation, and verification.
 ---
 
 # Release / publish procedure (five public surfaces)
@@ -66,12 +66,15 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    with the cut. Fragments landed since 2026-10-09 exist only there until this
    runs.
 
-   **Version cut touches seven files together**: the CHANGELOG (`## [N.N.N]`
+   **Version cut touches eight files together**: the CHANGELOG (`## [N.N.N]`
    header over `[Unreleased]` — one fragile line; the tag↔section guard test
    exists because an adjacent edit once deleted it silently), `pyproject.toml`,
    the daemon image tag in **both** compose files (`ops/docker-compose.yml`
    and the packaged copy `pseudolife_memory/compose/docker-compose.yml`,
    so, as nothing under the package may change, the cut PR is an exception: the maintainer rules it for each cut, and only then does it carry the `freeze-exception` label, applied by the maintainer or by the conductor after that ruling),
+   the Rust daemon image's default tag in the stack-manager file
+   `ops/docker-compose.stack.yml` (`${PSEUDOLIFE_IMAGE_TAG:-N.N.N}`: that
+   image is published under its release version only),
    **both** version fields in `server.json`,
    `plugin/release.json` (pinned to pyproject by
    `tests/test_plugin_packaging.py`; the release the hooks report for the
@@ -81,8 +84,8 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    `docs/atlas/atlas.json` `meta` (pinned by `tests/test_atlas_currency.py`;
    re-verify the map's claims, don't just renumber it — update
    `meta.verified` to the date you actually checked). `server.json` (both
-   fields) and the `ops/docker-compose.yml` daemon image tag are also pinned
-   locally by
+   fields), the `ops/docker-compose.yml` daemon image tag and the stack
+   file's default tag are also pinned locally by
    `tests/test_plugin_packaging.py::test_server_json_versions_match_pyproject`
    (issue #185) — run it as part of the cut, before tagging, so a missed
    field fails in the suite rather than mid-CI. Nothing pins the packaged
@@ -151,8 +154,8 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    PyPI-based updaters can obtain the archives once the wheel becomes
    visible. Native GitHub discovery waits for `RELEASE-READY.json`, which
    the workflow attaches only after the approved `publish` job and both
-   image jobs succeed, so the daemon, PostgreSQL and Rust daemon images
-   are all published. A manual wheel upload does not create the readiness
+   image jobs succeed, so the PostgreSQL and Rust daemon images are both
+   published. A manual wheel upload does not create the readiness
    marker.
    If the wheel build fails, the native assets can still attach to the
    public release before approval. Explicit tags and daemons with the
@@ -184,15 +187,15 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=pseudolife"`.
 5. **GHCR images — automated.** The `images` job in `release.yml` (also
    downstream of the human-approved `publish` gate) builds and pushes
-   `ghcr.io/pseudogiant-xr/pseudolife-daemon:{<version>,latest}` and
    `ghcr.io/pseudogiant-xr/pseudolife-pg:{18,18-<version>}` with the
-   repo-scoped `GITHUB_TOKEN` — no stored secret. The compose overlay
-   `ops/docker-compose.ghcr.yml` is the consumer (pull-not-build installs);
-   the base compose file and `ops/update.ps1`'s local-build deploy flow are
-   untouched. One-time after the FIRST release that runs the job: flip both
-   packages to public in their GHCR package settings, or pulls fail with
+   repo-scoped `GITHUB_TOKEN` — no stored secret. Since 0.26.0 no release
+   publishes the retired Python daemon image
+   `ghcr.io/pseudogiant-xr/pseudolife-daemon` (its earlier tags stay, and
+   legacy bank imports run the archived 0.23.1 image by digest), so do not
+   look for it. One-time after the FIRST release that runs the job: flip the
+   package to public in its GHCR package settings, or pulls fail with
    "denied". Verify:
-   `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>`.
+   `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-pg:18-<version>`.
 
    **Rust artifacts.** One repository variable, disabled when unset, gates
    the Rust image, and its publication remains downstream of the human-approved
@@ -201,12 +204,13 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    separate `pseudolife-daemon-rust:<version>` image. Since 0.23.0 the Rust
    daemon is the default Docker engine, so confirm before the release that
    this variable is still `true`: with the image published, install and
-   release-mode `pseudolife-mcp update` select it (`--engine python` keeps
-   or switches back to Python); without it, no readiness marker is attached,
+   release-mode `pseudolife-mcp update` select it and move a host still on
+   the retired Python daemon to it (release mode refuses `--engine python`);
+   without it, no readiness marker is attached,
    so the native client's unpinned update and check report nothing newer and
    a daemon with the readiness rule gives no notice; clients that discover
-   through PyPI, and `--tag <version>`, still reach the release, where a host
-   that never chose an engine stays on Python and `--engine rust` stops at its
+   through PyPI, and `--tag <version>`, still reach the release, where the
+   update of a Python host refuses before anything changes and `--engine rust` stops at its
    `docker pull` with nothing changed. The Rust image gets only the explicit version
    tag; the workflow pushes no `latest` for it.
    The five native CLI archives, `SHA256SUMS` and
@@ -228,7 +232,7 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    Verify a published image with
    `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>`
    and flip its GHCR package to public after the first release that runs
-   the job, as for the Python image.
+   the job, as for the PostgreSQL image.
 
    Run the build-only `release.yml` workflow dispatch on the candidate
    first. The native build and bundle jobs must compile and execute the
@@ -259,7 +263,7 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    before any removal. If the marker job fails in a way a re-run cannot clear
    (it runs the tagged commit's own script, so a fault in it repeats), the
    maintainer chooses between attaching a hand-built `RELEASE-READY.json` with
-   `gh release upload` after checking the three images by hand, and cutting a
+   `gh release upload` after checking the two images by hand, and cutting a
    patch release. If approval is declined, the marker stays absent and native
    GitHub discovery withholds the release. Older consumers and explicit tags
    still use their existing routes. To abandon a version after declining approval,

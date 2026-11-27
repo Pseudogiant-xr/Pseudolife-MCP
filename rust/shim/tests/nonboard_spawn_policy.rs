@@ -140,6 +140,31 @@ fn an_unconfigured_or_python_only_shim_names_the_docker_tier_and_the_serve_comma
 }
 
 #[test]
+fn the_start_remedy_starts_the_existing_containers_and_recreates_nothing() {
+    // `docker compose -f ops/docker-compose.yml up -d` recreated the daemon
+    // from the base file, whose image is the retired Python daemon.
+    use pseudolife_stdio::cli::retired::{DOCKER_START, serve_message};
+    use pseudolife_stdio::lifecycle::{
+        NO_CONFIGURED_SPAWN_NOTE, PYTHON_SPAWN_RETIRED_NOTE, unreachable_remedy,
+    };
+    assert_eq!(
+        DOCKER_START,
+        "docker start pseudolife-mcp-postgres pseudolife-mcp-daemon"
+    );
+    let texts = [
+        NO_CONFIGURED_SPAWN_NOTE.to_owned(),
+        PYTHON_SPAWN_RETIRED_NOTE.to_owned(),
+        serve_message(),
+        unreachable_remedy(Some(NO_CONFIGURED_SPAWN_NOTE)).unwrap(),
+    ];
+    for text in &texts {
+        assert!(text.contains(DOCKER_START), "{text}");
+        assert!(!text.contains("docker compose"), "{text}");
+        assert!(!text.contains("up -d"), "{text}");
+    }
+}
+
+#[test]
 fn an_unreachable_unconfigured_daemon_tells_the_client_how_to_start_one() {
     use pseudolife_stdio::lifecycle::{
         INVALID_SERVE_COMMAND_NOTE, NO_CONFIGURED_SPAWN_NOTE, PYTHON_SPAWN_RETIRED_NOTE,
