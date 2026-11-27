@@ -715,7 +715,7 @@ mod posix {
                 ),
             ),
             (
-                "groups also from systemd's userdb (nsswitch)",
+                "groups also from systemd while its userdb may serve more",
                 Accounts::from_files(
                     &format!("me:x:{uid}:{gid}::/home/me:/bin/sh\n"),
                     &format!("me:x:{gid}:\n"),
@@ -785,7 +785,24 @@ mod posix {
                 false,
             ),
         ] {
-            assert_eq!(nss_files_only(text), files_only, "{text:?}");
+            assert_eq!(nss_files_only(text, false), files_only, "{text:?}");
+        }
+        // With systemd's userdb serving nothing beyond the files.
+        for (text, files_only) in [
+            ("passwd: files systemd\ngroup: files systemd\n", true),
+            (
+                "passwd: files\ngroup: files [SUCCESS=merge] systemd\n",
+                true,
+            ),
+            (
+                "passwd: files\ngroup: files\ninitgroups: files systemd\n",
+                true,
+            ),
+            ("passwd: files systemd\ngroup: files systemd sss\n", false),
+            ("passwd: files\ngroup: systemd\n", false),
+            ("passwd: files\ngroup: files systemd ldap\n", false),
+        ] {
+            assert_eq!(nss_files_only(text, true), files_only, "{text:?}");
         }
     }
 
@@ -917,6 +934,93 @@ mod posix {
             Accounts::under(root).private_group(1000, 1000),
             "drop-ins removed"
         );
+    }
+
+    #[test]
+    fn stock_systemd_counts_only_while_its_userdb_serves_nothing_else() {
+        let scratch = Scratch::new("accounts-systemd");
+        let root = &scratch.0;
+        let write = |file: &str, text: &str| {
+            let path = root.join(file);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        };
+        let trusted = || Accounts::under(root).private_group(1000, 1000);
+        write(
+            "etc/passwd",
+            "root:x:0:0::/root:/bin/sh\nme:x:1000:1000::/home/me:/bin/sh\n",
+        );
+        write("etc/group", "root:x:0:\nme:x:1000:\n");
+        // Debian's and Ubuntu's stock lines.
+        write(
+            "etc/nsswitch.conf",
+            "passwd: files systemd\ngroup: files systemd\nshadow: files systemd\n",
+        );
+        // No /run/systemd/userdb: nss-systemd has no service to ask.
+        assert!(trusted(), "no userdb folder");
+        let services = root.join("run/systemd/userdb");
+        fs::create_dir_all(&services).unwrap();
+        assert!(trusted(), "an empty userdb folder");
+        for service in [
+            "io.systemd.DynamicUser",
+            "io.systemd.Multiplexer",
+            "io.systemd.NameServiceSwitch",
+            "io.systemd.DropIn",
+        ] {
+            fs::write(services.join(service), "").unwrap();
+        }
+        assert!(trusted(), "only the standard services");
+        for other in [
+            "io.systemd.Home",
+            "io.systemd.Machine",
+            "org.example.Directory",
+        ] {
+            fs::write(services.join(other), "").unwrap();
+            assert!(!trusted(), "{other}");
+            fs::remove_file(services.join(other)).unwrap();
+        }
+        // Any drop-in record, a membership above all.
+        for (dir, record) in [
+            ("etc/userdb", "other:me.membership"),
+            ("run/userdb", "me.group"),
+            ("usr/local/lib/userdb", "other.user"),
+        ] {
+            write(&format!("{dir}/{record}"), "{}");
+            assert!(!trusted(), "{dir}/{record}");
+            fs::remove_dir_all(root.join(dir)).unwrap();
+        }
+        assert!(trusted(), "drop-ins removed");
+        // A userdb folder that cannot be listed (root can list anything).
+        if rustix::process::geteuid().as_raw() != 0 {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&services, fs::Permissions::from_mode(0o000)).unwrap();
+            let unreadable = trusted();
+            fs::set_permissions(&services, fs::Permissions::from_mode(0o700)).unwrap();
+            assert!(!unreadable, "an unreadable userdb folder");
+        }
+        // With files alone the services do not matter.
+        write("etc/nsswitch.conf", "passwd: files\ngroup: files\n");
+        fs::write(services.join("io.systemd.Home"), "").unwrap();
+        assert!(trusted(), "files only");
+    }
+
+    #[test]
+    fn a_gid_systemd_hands_out_or_synthesizes_is_never_private() {
+        for id in [61184_u32, 61200, 65519, 0x7FFE_0000, 0x7FFE_FFFF] {
+            let accounts = Accounts::from_text(
+                &format!("me:x:{id}:{id}::/home/me:/bin/sh\n"),
+                &format!("me:x:{id}:\n"),
+            );
+            assert!(!accounts.private_group(id, id), "{id}");
+        }
+        // The ids either side are ordinary.
+        for id in [61183_u32, 65520] {
+            let accounts = Accounts::from_text(
+                &format!("me:x:{id}:{id}::/home/me:/bin/sh\n"),
+                &format!("me:x:{id}:\n"),
+            );
+            assert!(accounts.private_group(id, id), "{id}");
+        }
     }
 }
 

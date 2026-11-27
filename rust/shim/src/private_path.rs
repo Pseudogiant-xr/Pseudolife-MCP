@@ -295,7 +295,8 @@ pub(crate) fn check_ancestors_with(path: &Path, accounts: Accounts) -> Result<()
 /// shared one. An account they do not list (one from LDAP, say) is never
 /// taken for a private group, and nor is any group while the system may
 /// also take accounts or groups from a source those files do not show
-/// (`nsswitch.conf`, systemd's userdb), so its folders keep the plain rule.
+/// (`nsswitch.conf`, systemd's userdb services), so its folders keep the
+/// plain rule.
 /// `/etc/gshadow` is readable only by root and is not consulted.
 #[cfg(unix)]
 #[derive(Clone, Debug, Default)]
@@ -307,15 +308,15 @@ pub(crate) struct Accounts {
 }
 
 /// Whether `nsswitch.conf` takes `passwd`, `group` and `initgroups` only from
-/// the local files. Only `files` counts: `systemd` also serves userdb and
-/// systemd-homed records (`*.user` `memberOf`, `*.group` members, varlink)
-/// these files do not show, and `compat`'s `+`/`-` lines pull in NIS. Both
-/// `passwd` and `group` must be named, each line with `files` in it (one
-/// with no source is glibc's default, unread); `initgroups` falls back to
-/// `group`.
-/// As glibc does, a database name ends at whitespace or `:`, case aside.
+/// the local files. `files` counts, and `systemd` only when
+/// `systemd_local` says its userdb serves nothing beyond them (see
+/// [`Accounts::under`]); anything else, `compat`'s NIS `+`/`-` lines
+/// included, does not. Both `passwd` and `group` must be named, each line
+/// with `files` in it (one with no source is glibc's default, unread);
+/// `initgroups` falls back to `group`. As glibc does, a database name ends
+/// at whitespace or `:`, case aside.
 #[cfg(unix)]
-pub(crate) fn nss_files_only(nsswitch: &str) -> bool {
+pub(crate) fn nss_files_only(nsswitch: &str, systemd_local: bool) -> bool {
     let (mut passwd, mut group) = (false, false);
     let local = nsswitch.lines().all(|line| {
         let line = line.split('#').next().unwrap_or("").trim_start();
@@ -344,8 +345,8 @@ pub(crate) fn nss_files_only(nsswitch: &str) -> bool {
                 }
                 return true;
             }
-            files = word == "files";
-            files
+            files |= word == "files";
+            word == "files" || (systemd_local && word == "systemd")
         }) && !in_action
             && files
     });
@@ -396,6 +397,28 @@ const USERDB_DIRS: [&str; 5] = [
     "usr/local/lib/userdb",
 ];
 
+/// The varlink services in `/run/systemd/userdb` that add no account,
+/// group or membership the local files lack, while no drop-in record exists:
+/// PID 1's `DynamicUser` (ids from [`SYSTEMD_RANGES`] only, no memberships),
+/// and systemd-userdbd's `Multiplexer`, `NameServiceSwitch` (which
+/// nss-systemd skips, and which serves glibc's own NSS records) and `DropIn`
+/// (the drop-in records). Any other service (`io.systemd.Home`,
+/// `io.systemd.Machine`, `io.systemd.NamespaceResource`, one unknown) may.
+#[cfg(unix)]
+const SYSTEMD_LOCAL_SERVICES: [&str; 4] = [
+    "io.systemd.DynamicUser",
+    "io.systemd.Multiplexer",
+    "io.systemd.NameServiceSwitch",
+    "io.systemd.DropIn",
+];
+
+/// Ids systemd hands out or synthesizes itself, never a user's private
+/// group here: `DynamicUser=` (61184-65519, systemd's `docs/UIDS-GIDS.md`)
+/// and the foreign range (0x7FFE0000-0x7FFEFFFF).
+#[cfg(unix)]
+const SYSTEMD_RANGES: [std::ops::RangeInclusive<u32>; 2] =
+    [61184..=65519, 0x7FFE_0000..=0x7FFE_FFFF];
+
 /// Where glibc may read `nsswitch.conf`, relative to the root: openSUSE's
 /// glibc falls back to `/usr/etc` when `/etc` has none.
 #[cfg(unix)]
@@ -411,7 +434,32 @@ impl Accounts {
     /// at least one `nsswitch.conf`, every one that exists files-only (a
     /// missing one is glibc's built-in default, not read here, so it fails
     /// closed), and no userdb drop-in record at all.
+    ///
+    /// `systemd` there counts as the files only while `/run/systemd/userdb`
+    /// holds nothing but [`SYSTEMD_LOCAL_SERVICES`]; an unreadable folder
+    /// does not count. nss-systemd finds its services by listing that folder
+    /// and treats a missing one as no service at all, which leaves only the
+    /// drop-ins (refused here) and the `root`, `nobody` and foreign groups it
+    /// synthesizes, which have no members.
     pub(crate) fn under(root: &Path) -> Self {
+        let userdb = USERDB_DIRS
+            .iter()
+            .any(|dir| match std::fs::read_dir(root.join(dir)) {
+                Ok(mut entries) => entries.next().is_some(),
+                Err(error) => error.kind() != io::ErrorKind::NotFound,
+            });
+        // A drop-in record already makes it not files-only (below).
+        let systemd_local = match std::fs::read_dir(root.join("run/systemd/userdb")) {
+            Ok(mut entries) => entries.all(|entry| {
+                entry.is_ok_and(|entry| {
+                    SYSTEMD_LOCAL_SERVICES
+                        .iter()
+                        .any(|service| entry.file_name() == *service)
+                })
+            }),
+            // No folder: nss-systemd has no service to ask.
+            Err(error) => error.kind() == io::ErrorKind::NotFound,
+        };
         let mut found = false;
         let nsswitch_local =
             NSSWITCH_FILES
@@ -419,16 +467,10 @@ impl Accounts {
                 .all(|file| match std::fs::read_to_string(root.join(file)) {
                     Ok(text) => {
                         found = true;
-                        nss_files_only(&text)
+                        nss_files_only(&text, systemd_local)
                     }
                     Err(error) => error.kind() == io::ErrorKind::NotFound,
                 });
-        let userdb = USERDB_DIRS
-            .iter()
-            .any(|dir| match std::fs::read_dir(root.join(dir)) {
-                Ok(mut entries) => entries.next().is_some(),
-                Err(error) => error.kind() != io::ErrorKind::NotFound,
-            });
         Self {
             passwd: std::fs::read_to_string(root.join("etc/passwd")).unwrap_or_default(),
             group: std::fs::read_to_string(root.join("etc/group")).unwrap_or_default(),
@@ -446,7 +488,7 @@ impl Accounts {
         Self {
             passwd: passwd.to_owned(),
             group: group.to_owned(),
-            files_only: nss_files_only(nsswitch),
+            files_only: nss_files_only(nsswitch, false),
         }
     }
 
@@ -454,7 +496,7 @@ impl Accounts {
     /// user is, with no other member, and no other account's primary group.
     /// Any record line that does not read cleanly makes it not private.
     pub(crate) fn private_group(&self, uid: u32, gid: u32) -> bool {
-        if !self.files_only {
+        if !self.files_only || SYSTEMD_RANGES.iter().any(|range| range.contains(&gid)) {
             return false;
         }
         let (Some(passwd), Some(group)) = (records(&self.passwd, 7), records(&self.group, 4))
