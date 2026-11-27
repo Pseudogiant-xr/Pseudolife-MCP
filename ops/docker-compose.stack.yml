@@ -101,6 +101,9 @@ services:
     - host.docker.internal:host-gateway
     ports:
     - 127.0.0.1:8765:8765
+    # No documents folder here: a stack manager resolves `~` under its own
+    # account. document_ingest refuses until pseudolife-mcp update, which
+    # mounts ~/.pseudolife-mcp/documents (docs/guide/install-and-move.md).
     volumes:
     - pseudolife_data:/data
     - pseudolife_rust_models:/models

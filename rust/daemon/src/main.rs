@@ -19,6 +19,7 @@ mod consolidation_tools;
 mod contradiction;
 mod correction_tools;
 mod counters;
+mod document_roots;
 mod documents;
 mod dream;
 mod embed;

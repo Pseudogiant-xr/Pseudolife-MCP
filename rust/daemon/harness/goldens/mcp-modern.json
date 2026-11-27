@@ -83,10 +83,21 @@
     "retrieval_events",
     "created_at",
     "clock: retrieval event wall clock per row"
+   ],
+   [
+    "slot_reads",
+    "last_read_at",
+    "clock: wall clock per slot read"
    ]
   ],
   "golden": "golden_scrub in run.py",
   "health": "normalize_health in run.py"
+ },
+ "recorded_from_candidate": {
+  "candidate_sha256": "5c0399f6f077042484cc3bac79652e9785165e148cb2fb1c2d0cd99665ea61fd",
+  "commit": "8be76206045b52e2d3d75379bc9f271a46262944",
+  "platform": "linux",
+  "rust_tree": "clean"
  },
  "responses": [
   {
@@ -3013,7 +3024,7 @@
         "additionalProperties": false,
         "properties": {
          "path": {
-          "description": "Path to a .txt / .md / .pdf file, resolved on the SERVER's filesystem \u2014 with the Docker daemon, a path visible inside the container (e.g. a mounted volume), not a host path.",
+          "description": "Absolute path to a .txt / .md / .pdf file inside a documents directory on the SERVER (memory.reference.ingest_roots); any other path is refused. With the Docker install, copy the file into ~/.pseudolife-mcp/documents on the daemon's host and pass /documents/<name>.",
           "title": "Path",
           "type": "string"
          },

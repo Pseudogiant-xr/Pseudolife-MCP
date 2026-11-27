@@ -523,7 +523,13 @@ class RuntimeAccountTest(unittest.TestCase):
         self.assertIn(f"chown {uid}:{gid} /models /data", dockerfile)
         self.assertIn('ENTRYPOINT ["/usr/local/bin/provision-daemon-models"]', dockerfile)
         overlays = [ROOT / "ops/docker-compose.rust-ghcr.yml", ROOT / "pseudolife_memory/compose/docker-compose.rust-ghcr.yml"]
-        self.assertEqual(overlays[0].read_bytes().replace(b"\r\n", b"\n"), overlays[1].read_bytes().replace(b"\r\n", b"\n"))
+        # The frozen package's copy predates the documents folder (its four
+        # lines, the only ones naming documents); every other line matches.
+        shipped = overlays[0].read_text(encoding="utf-8").splitlines()
+        documents = [line for line in shipped if "document" in line.lower()]
+        self.assertEqual(len(documents), 4)
+        self.assertEqual([line for line in shipped if line not in documents],
+                         overlays[1].read_text(encoding="utf-8").splitlines())
         for base_path, overlay_path in ((ROOT / "ops/docker-compose.yml", overlays[0]),
                                         (ROOT / "pseudolife_memory/compose/docker-compose.yml", overlays[1])):
             base, overlay = service(base_path), service(overlay_path)

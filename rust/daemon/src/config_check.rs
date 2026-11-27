@@ -21,6 +21,11 @@ pub fn startup_refusals(config: &config::Config) -> Result<()> {
     if let Some(refusal) = config::retired_band_refusal(&config.memory) {
         anyhow::bail!(refusal);
     }
+    if let Some(refusal) =
+        crate::document_roots::startup_refusal(&config.memory.reference.ingest_roots)
+    {
+        anyhow::bail!(refusal);
+    }
     Ok(())
 }
 
@@ -108,6 +113,17 @@ mod tests {
         let error = startup_refusals(&config).unwrap_err().to_string();
         assert!(error.contains("memory.reranker.model_name"), "{error}");
         assert!(error.contains("Python engine"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_refuses_a_pseudo_filesystem_documents_directory() {
+        let mut config = config::Config::default();
+        config.memory.reference.ingest_roots = vec!["/documents".into()];
+        assert!(startup_refusals(&config).is_ok());
+        config.memory.reference.ingest_roots = vec!["/proc".into()];
+        let error = startup_refusals(&config).unwrap_err().to_string();
+        assert!(error.contains("memory.reference.ingest_roots"), "{error}");
     }
 
     #[test]

@@ -38,6 +38,10 @@ pub(crate) async fn route(
 }
 
 #[cfg(test)]
+#[path = "mcp_ingest_tests.rs"]
+mod ingest_tests;
+
+#[cfg(test)]
 mod tests {
     //! The tokenless mount behind the SDK's loopback Host/Origin allowlist
     //! (`mcp_server.transport_security_for(False)`), with each legitimate

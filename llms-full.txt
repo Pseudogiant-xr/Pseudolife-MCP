@@ -300,6 +300,12 @@ PY
 chmod 600 .env client.token
 ```
 
+The stack file mounts no documents folder, so `document_ingest` refuses
+every file (`no_document_roots`) on a stack the manager deployed. A stack
+manager would resolve `~` in such a mount under its own account, not yours.
+`pseudolife-mcp update` mounts `~/.pseudolife-mcp/documents` read-only at
+`/documents`; ingest then reads `/documents/<name>`.
+
 The first token authenticates the reserved `default` principal. Keep it
 private; never paste it into chat or tracked YAML. The Rust daemon gives
 the writable bank its identity at startup. Once it is ready, use
@@ -943,7 +949,7 @@ is agent context every session, so it stays lean.
 | `memory_graph(entity, depth?, include_facts?, to?, relation_filter?)` | Entity neighborhood (≤3 hops) with derived transitive/inverse edges and per-edge `EXTRACTED/INFERRED/AMBIGUOUS` provenance tags; `to` returns the shortest path between two entities |
 | `memory_recall(query, hops?, top_k?, verbose?)` | Multi-hop retrieval for relational questions; `low_confidence: true` → fall back to `memory_search` |
 | `memory_relation_define(name, description, ...)` | Grow the closed relation vocabulary (deliberate, rare act) |
-| `document_ingest(path, source?)` | Index a file (txt/md/pdf/html) verbatim in the reference bank — the lossless complement to agent-side distillation ([division of labor](docs/guide/memory-model.md#background-documents--the-reference-bank)) |
+| `document_ingest(path, source?)` | Index a file (txt/md/pdf/html) from the daemon's documents directory (Docker: `~/.pseudolife-mcp/documents`, passed as `/documents/<name>`) verbatim in the reference bank — the lossless complement to agent-side distillation ([division of labor](docs/guide/memory-model.md#background-documents--the-reference-bank)) |
 | `document_search(query, top_k?)` | RAG search over the reference bank only |
 | `memory_toolset(action)` | Check or change this principal's visibility tier: `status` / `expand` / `collapse` |
 
@@ -2946,10 +2952,18 @@ For an important document, do both: distil the key facts into memory *and*
 > installed by default and copyleft-free; `pypdf` is the fallback when it
 > cannot be imported). There is **no OCR** — a scanned, image-only PDF ingests
 > as empty text; have the agent read it and store the distillate instead.
-> Paths resolve on the **server's** filesystem: with the Docker daemon,
-> `document_ingest` needs a path visible inside the container (a mounted
-> volume), not a host path. It reads only a regular file (a symlink to one
-> is fine) of at most 64 MiB, enough for a 1,000-page manual as a PDF with
+> Paths resolve on the **server's** filesystem, and `document_ingest` reads
+> only from its **documents directories**: with the Docker install, copy the
+> file into `~/.pseudolife-mcp/documents` on the daemon's host (mounted
+> read-only at `/documents`) and pass `/documents/<name>`; to read from
+> another directory, add it to `memory.reference.ingest_roots`
+> ([Documents directory](configuration.md#documents-directory)). Any other
+> path, a relative one, or a link leading out of a documents directory is
+> refused as `document_outside_roots` (or `document_path_not_absolute`; a
+> path with `..` as `document_path_dotdot`), and
+> with no documents directory configured every ingest is refused as
+> `no_document_roots`. It reads only a regular file (a symlink to one inside
+> a documents directory is fine) of at most 64 MiB, enough for a 1,000-page manual as a PDF with
 > figures. A directory, FIFO, socket or device is refused as
 > `not_a_regular_file`, naming what the path is, and a larger file as
 > `document_too_large`, with its size and the cap, before anything is read;
@@ -3025,8 +3039,10 @@ text and structured content are the same JSON object:
 `error` is a stable snake_case code and `message` one sentence naming the
 fix. `param`, `accepted` and `action` appear where the refusal knows them.
 The general codes are `invalid_argument`, `unknown_parameter`,
-`file_not_found`, `not_a_regular_file` and `document_too_large`
-(`document_ingest`; paths resolve on the server's filesystem),
+`file_not_found`, `not_a_regular_file`, `document_too_large`,
+`document_outside_roots`, `document_path_not_absolute`,
+`document_path_dotdot`, `document_unreadable` and `no_document_roots` (`document_ingest`; paths
+resolve on the server's filesystem, inside its documents directories),
 `internal_error` (the cause stays in the daemon log) and
 `coordination_unavailable` (the board failed inside the call). A tool's own
 coded refusal keeps its code (`missing_parameter`, `invalid_park`, ...).
@@ -9576,6 +9592,49 @@ In **file mode only**, wipe memory by deleting `data/` and restarting; wipe
 just the associative store via `data/memory_state/`. (In containerized mode these files are not the source
 of truth — see the volume note above.)
 
+### Documents directory
+
+`document_ingest` reads only files inside its documents directories, so an
+agent can index a document you put there and nothing else on the daemon's
+machine. The Docker install creates `~/.pseudolife-mcp/documents` (on
+Windows `%USERPROFILE%\.pseudolife-mcp\documents`) and mounts it
+read-only into the daemon container at `/documents`; copy a file there and
+ingest it as `/documents/<name>` (subdirectories work too). Install and
+`pseudolife-mcp update` create the folder when it is missing and change
+nothing when it is there.
+
+- `memory.reference.ingest_roots` in `config.yaml` (a list of absolute
+  directories) adds documents directories, for example a directory you
+  mount into the container yourself.
+- `PSEUDOLIFE_DAEMON_DOCUMENT_ROOTS` (a path list, `:`-separated on Linux
+  and macOS, `;` on Windows) names more; the shipped Compose files set it
+  to `/documents` beside the mount.
+- The daemon reads from the union of both. With neither set every ingest is
+  refused as `no_document_roots`, and a configured directory that does not
+  exist is skipped.
+- A path is resolved first (links followed, `..` applied) and must still be
+  inside a documents directory, which is itself resolved, so a link leading
+  out of one is refused as `document_outside_roots`, as is any path outside,
+  whether or not it exists.
+- `/proc`, `/sys`, `/dev` and `/` can never be documents directories: the
+  daemon refuses to start with one configured.
+- On Linux the folder is world-readable (`0755`) so the container's daemon
+  account can read it, inside the owner-only `~/.pseudolife-mcp`, which
+  keeps other users of the machine out; files you copy in need to be
+  readable by others too (the default `umask` makes them so), and a file
+  the daemon cannot read is refused as `document_unreadable` with the
+  `chmod` that fixes it.
+- A daemon that already mounts something else at `/documents` stops
+  `pseudolife-mcp update` before anything changes: move that mount to
+  another container path and add the path to `memory.reference.ingest_roots`.
+- If Docker created the folder before the native update could (an update
+  run by an older client), it belongs to root. The client steps of that same
+  update, and every later install or update, give it back to you with a
+  one-off container of the daemon image already on the host (only that
+  folder mounted, only its owner changed) and say so in one line; where
+  Docker cannot, or another non-root account owns the folder, they name the
+  `sudo chown` that gives it back instead.
+
 ## The test suite's Postgres login: `pseudolife-mcp test-login`
 
 The bundled Postgres serves the bank and the test suite's databases under
@@ -12852,7 +12911,8 @@ problem than the limitation it hides.
   wrote four hundred facts about one entity. The **review queue** and the
   Console's counts are how a human would notice, and only if they look.
 - **Ingested-document provenance.** `document_ingest` indexes what you
-  point it at; the reference bank carries no trust tier of its own.
+  point it at inside its documents directories; the reference bank carries
+  no trust tier of its own.
 - **World-fact citations are not verified.** A **world fact** carries a
   source URL and a quote because someone asserted them. Nothing fetches
   the URL to confirm the quote is there.

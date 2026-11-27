@@ -6200,7 +6200,7 @@ def side_env(scn: dict, dsn: str, extra: dict | None = None) -> dict:
     env = {"PSEUDOLIFE_RELEASE_CHECK": "0", "PSEUDOLIFE_PLUGIN_DIR": str(w1a.REPO / "plugin"),
            "PSEUDOLIFE_MCP_DATABASE_URL": dsn, "PSEUDOLIFE_MCP_TOKEN": TOKEN}
     env.update(w1a.real_bank_env())
-    env.update(scn.get("env", {}))
+    env.update({k: w2e_documents.resolve(v) for k, v in scn.get("env", {}).items()})
     env.update(extra or {})
     return env
 

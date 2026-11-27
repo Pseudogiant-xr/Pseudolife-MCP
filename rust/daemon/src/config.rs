@@ -149,6 +149,10 @@ pub struct ReferenceConfig {
     pub max_results: Option<i64>,
     /// Original value for the lenient-read diagnostic.
     pub max_results_raw: Value,
+    /// `memory.reference.ingest_roots`: the directories `document_ingest`
+    /// reads from, beside `PSEUDOLIFE_DAEMON_DOCUMENT_ROOTS`
+    /// (`document_roots.rs`). The Rust daemon's own key: none by default.
+    pub ingest_roots: Vec<String>,
 }
 
 impl Default for ReferenceConfig {
@@ -158,6 +162,7 @@ impl Default for ReferenceConfig {
             chunk_overlap: 64,
             max_results: Some(5),
             max_results_raw: Value::from(5),
+            ingest_roots: Vec::new(),
         }
     }
 }
@@ -811,6 +816,9 @@ pub struct DaemonEnv {
     pub release_check_disabled: bool,
     pub plugin_dir: Option<PathBuf>,
     pub build: Option<BuildStamp>,
+    /// `PSEUDOLIFE_DAEMON_DOCUMENT_ROOTS`: more documents directories for
+    /// `document_ingest` (`document_roots.rs`), read once at startup.
+    pub document_roots: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1251,6 +1259,7 @@ impl DaemonEnv {
             release_check_disabled,
             plugin_dir: non_empty("PSEUDOLIFE_PLUGIN_DIR").map(PathBuf::from),
             build,
+            document_roots: env(crate::document_roots::ROOTS_ENV),
         })
     }
 }
@@ -2179,6 +2188,21 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 max_results_raw: raw_lookup(r, "max_results")
                     .map(node_json)
                     .unwrap_or(d.max_results_raw),
+                ingest_roots: match lookup(r, "ingest_roots")? {
+                    None | Some(Node::Null) => d.ingest_roots,
+                    Some(node) => {
+                        let roots = want_str_list(node, "memory.reference.ingest_roots")?;
+                        for root in &roots {
+                            if let Some(problem) = crate::document_roots::root_problem(root) {
+                                return Err(refuse(format!(
+                                    "{}: {problem}",
+                                    crate::document_roots::ROOTS_KEY
+                                )));
+                            }
+                        }
+                        roots
+                    }
+                },
             };
         }
         // `mem_raw.get("ref_top_k", 3)`, untyped too: it slices the pool
@@ -4409,6 +4433,7 @@ mod tests {
                 release_check_disabled: false,
                 plugin_dir: None,
                 build: None,
+                document_roots: None,
             }
         );
     }

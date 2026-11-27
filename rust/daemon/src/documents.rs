@@ -103,16 +103,40 @@ pub(crate) enum ReadError {
 /// the call), checked again on the open handle, then read at most one byte
 /// past the cap, so a file that grows or reports no size (a `/proc` entry)
 /// is refused rather than read without end.
+#[cfg(test)]
 pub(crate) fn read_document_bytes(path: &str, cap: u64) -> Result<Vec<u8>, ReadError> {
+    read_document_bytes_within(path, cap, None)
+}
+
+/// `read_document_bytes`, and when `roots` is given the opened file must
+/// still lie inside one of these resolved documents directories
+/// (`document_roots::opened_inside`): a directory swapped for a link
+/// between the check and the open is refused, not read.
+pub(crate) fn read_document_bytes_within(
+    path: &str,
+    cap: u64,
+    roots: Option<&[std::path::PathBuf]>,
+) -> Result<Vec<u8>, ReadError> {
     use std::io::Read;
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NONBLOCK);
+        // The path was resolved by `document_roots::admit`: a link put in
+        // place of the file since then is refused, not followed.
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
     }
     let file = options.open(path).map_err(ReadError::Io)?;
+    if let Some(roots) = roots
+        && !crate::document_roots::opened_inside(&file, roots)
+    {
+        return Err(ReadError::Refused(format!(
+            "{}: {path} moved outside the documents directories while it was being \
+             ingested; retry",
+            crate::document_roots::OUTSIDE
+        )));
+    }
     let meta = file.metadata().map_err(ReadError::Io)?;
     if let Some(problem) = file_problem(path, &meta, cap) {
         return Err(ReadError::Refused(problem));
@@ -291,33 +315,6 @@ pub(crate) fn py_suffix(name: &str) -> &str {
     }
 }
 
-/// `Path.exists()` (CPython 3.11/3.12): a stat failing with ENOENT,
-/// ENOTDIR, EBADF or ELOOP (on Windows, path-not-found and the ignored
-/// winerrors), or a path the OS cannot encode (an embedded NUL), is
-/// `False`; any other failure raises.
-fn py_exists(path: &str) -> Result<bool, std::io::Error> {
-    if path.contains('\0') {
-        return Ok(false);
-    }
-    match std::fs::metadata(path) {
-        Ok(_) => Ok(true),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        #[cfg(unix)]
-        Err(e)
-            if matches!(
-                e.raw_os_error(),
-                Some(libc::ENOTDIR | libc::EBADF | libc::ELOOP)
-            ) =>
-        {
-            Ok(false)
-        }
-        // `_IGNORED_WINERRORS`: not ready, invalid name, symlink loop.
-        #[cfg(windows)]
-        Err(e) if matches!(e.raw_os_error(), Some(3 | 21 | 123 | 1921)) => Ok(false),
-        Err(e) => Err(e),
-    }
-}
-
 /// `str(OSError)` for a failed `open(path)`: `[Errno N] strerror: 'path'`.
 /// Windows renders the OS message instead (`divergences.md`,
 /// DOC-OSERROR-TEXT).
@@ -441,16 +438,30 @@ fn without_nul(s: &str) -> String {
 /// `extract_text(path)` as `_read_file` runs it.
 // The body-slice error type (`dispatch::ToolError`) is the large one.
 #[allow(clippy::result_large_err)]
+#[cfg(test)]
 fn extract_text(path: &str, name: &str) -> Result<String, ToolError> {
+    extract_text_within(path, name, None)
+}
+
+/// `extract_text` reading through [`read_document_bytes_within`].
+#[allow(clippy::result_large_err)]
+fn extract_text_within(
+    path: &str,
+    name: &str,
+    roots: Option<&[std::path::PathBuf]>,
+) -> Result<String, ToolError> {
     let suffix = py_suffix(name).to_lowercase();
     // Unwrapped reads raise the OSError itself: a file removed since the
     // `exists()` check is FileNotFoundError, anything else internal; a
     // refusal of the file is raised as it is.
     let read = || {
-        read_document_bytes(path, MAX_DOCUMENT_BYTES).map_err(|e| match e {
+        read_document_bytes_within(path, MAX_DOCUMENT_BYTES, roots).map_err(|e| match e {
             ReadError::Refused(problem) => ToolError::Invalid(problem),
             ReadError::Io(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 ToolError::FileNotFound(py_oserror(&e, path))
+            }
+            ReadError::Io(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                ToolError::Invalid(crate::document_roots::unreadable(path, &e.to_string()))
             }
             ReadError::Io(e) => internal(e),
         })
@@ -482,9 +493,12 @@ fn extract_text(path: &str, name: &str) -> Result<String, ToolError> {
     if TEXT_SUFFIXES.contains(&suffix.as_str()) {
         return Ok(decode_text(&read()?));
     }
-    match read_document_bytes(path, MAX_DOCUMENT_BYTES) {
+    match read_document_bytes_within(path, MAX_DOCUMENT_BYTES, roots) {
         Ok(bytes) => Ok(decode_text(&bytes)),
         Err(ReadError::Refused(problem)) => Err(ToolError::Invalid(problem)),
+        Err(ReadError::Io(e)) if e.kind() == std::io::ErrorKind::PermissionDenied => Err(
+            ToolError::Invalid(crate::document_roots::unreadable(path, &e.to_string())),
+        ),
         Err(ReadError::Io(e)) => Err(ToolError::Invalid(format!(
             "Cannot read file {name}: {}",
             py_oserror(&e, path)
@@ -651,14 +665,44 @@ fn now() -> f64 {
         .unwrap_or(0.0)
 }
 
+/// The file an ingest of `shown` reads and the resolved roots its open is
+/// checked against, or the refusal (`document_roots::admit`).
+#[allow(clippy::result_large_err)]
+fn admitted_file(
+    shown: &str,
+    roots: &[String],
+) -> Result<(String, Vec<std::path::PathBuf>), ToolError> {
+    use crate::document_roots::{Admitted, admit, unreadable};
+    match admit(shown, roots)? {
+        Admitted::File { path, roots } => match path.to_str() {
+            Some(path) => Ok((path.to_string(), roots)),
+            None => Err(internal("the resolved document path is not UTF-8")),
+        },
+        Admitted::Missing => Err(ToolError::FileNotFound(format!(
+            "Not found on the server's filesystem: {shown}. The path resolves where the              daemon runs (with Docker, inside the container, e.g. a mounted volume), not on              the client."
+        ))),
+        Admitted::Unreadable(why) => Err(ToolError::Invalid(unreadable(shown, &why))),
+    }
+}
+
 fn mcp_document_ingest<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFuture<'a> {
     Box::pin(async move {
         let a = call.args;
         let raw = a.get("path").and_then(Value::as_str).unwrap_or_default();
         let source = a.get("source").and_then(Value::as_str).map(str::to_string);
-        let svc = app.service.clone();
-        let ready = svc.ensure_init().await.map_err(internal)?;
         let path = py_path(raw);
+        let svc = app.service.clone();
+        // Only a file inside a documents directory is read (`document_roots.rs`).
+        let roots = crate::document_roots::configured(
+            &svc.config.memory.reference.ingest_roots,
+            svc.env.document_roots.as_deref(),
+        )
+        .map_err(ToolError::Invalid)?;
+        // Checked before anything else, so a refused path is answered
+        // without the bank; inline (no await), so two ingests keep the order
+        // they arrived in, and checked again under the ingest lock below.
+        admitted_file(&path.shown, &roots)?;
+        let ready = svc.ensure_init().await.map_err(internal)?;
         let reference = svc.config.memory.reference.clone();
         let r2 = ready.clone();
         // Admitted ingests outlive their callers, as every write does.
@@ -670,29 +714,22 @@ fn mcp_document_ingest<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> Too
                 // held (`divergences.md`, DOC-INGEST-LOCK).
                 let _ingest = ingest_lock().lock().await;
                 let shown = path.shown.clone();
-                let exists = tokio::task::spawn_blocking(move || py_exists(&shown))
+                #[allow(clippy::result_large_err)]
+                let admit = move || admitted_file(&shown, &roots);
+                let (resolved, resolved_roots) = tokio::task::spawn_blocking(admit)
                     .await
-                    .map_err(internal)?
-                    .map_err(internal)?;
-                if !exists {
-                    return Err(ToolError::FileNotFound(format!(
-                        "Not found on the server's filesystem: {}. The path resolves where \
-                         the daemon runs (with Docker, inside the container, e.g. a mounted \
-                         volume), not on the client.",
-                        path.shown
-                    )));
-                }
+                    .map_err(internal)??;
                 // `source or file_path.name`: an empty source names the file too.
                 let src = source
                     .filter(|s| !s.is_empty())
                     .unwrap_or(path.name.clone());
-                let shown = path.shown.clone();
+                let shown = resolved;
                 let name = path.name.clone();
                 let embedder = r2.embedder.clone();
                 #[allow(clippy::result_large_err)]
                 let read_and_embed = move || {
                     document_file_problem(&shown, MAX_DOCUMENT_BYTES)?;
-                    let text = extract_text(&shown, &name)?;
+                    let text = extract_text_within(&shown, &name, Some(&resolved_roots))?;
                     let chunks = chunk_text(&text, reference.chunk_size, reference.chunk_overlap);
                     let mut embeddings = Vec::with_capacity(chunks.len());
                     for slice in chunks.chunks(INGEST_ENCODE_BATCH) {

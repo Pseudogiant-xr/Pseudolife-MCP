@@ -893,10 +893,18 @@ For an important document, do both: distil the key facts into memory *and*
 > installed by default and copyleft-free; `pypdf` is the fallback when it
 > cannot be imported). There is **no OCR** — a scanned, image-only PDF ingests
 > as empty text; have the agent read it and store the distillate instead.
-> Paths resolve on the **server's** filesystem: with the Docker daemon,
-> `document_ingest` needs a path visible inside the container (a mounted
-> volume), not a host path. It reads only a regular file (a symlink to one
-> is fine) of at most 64 MiB, enough for a 1,000-page manual as a PDF with
+> Paths resolve on the **server's** filesystem, and `document_ingest` reads
+> only from its **documents directories**: with the Docker install, copy the
+> file into `~/.pseudolife-mcp/documents` on the daemon's host (mounted
+> read-only at `/documents`) and pass `/documents/<name>`; to read from
+> another directory, add it to `memory.reference.ingest_roots`
+> ([Documents directory](configuration.md#documents-directory)). Any other
+> path, a relative one, or a link leading out of a documents directory is
+> refused as `document_outside_roots` (or `document_path_not_absolute`; a
+> path with `..` as `document_path_dotdot`), and
+> with no documents directory configured every ingest is refused as
+> `no_document_roots`. It reads only a regular file (a symlink to one inside
+> a documents directory is fine) of at most 64 MiB, enough for a 1,000-page manual as a PDF with
 > figures. A directory, FIFO, socket or device is refused as
 > `not_a_regular_file`, naming what the path is, and a larger file as
 > `document_too_large`, with its size and the cap, before anything is read;
@@ -972,8 +980,10 @@ text and structured content are the same JSON object:
 `error` is a stable snake_case code and `message` one sentence naming the
 fix. `param`, `accepted` and `action` appear where the refusal knows them.
 The general codes are `invalid_argument`, `unknown_parameter`,
-`file_not_found`, `not_a_regular_file` and `document_too_large`
-(`document_ingest`; paths resolve on the server's filesystem),
+`file_not_found`, `not_a_regular_file`, `document_too_large`,
+`document_outside_roots`, `document_path_not_absolute`,
+`document_path_dotdot`, `document_unreadable` and `no_document_roots` (`document_ingest`; paths
+resolve on the server's filesystem, inside its documents directories),
 `internal_error` (the cause stays in the daemon log) and
 `coordination_unavailable` (the board failed inside the call). A tool's own
 coded refusal keeps its code (`missing_parameter`, `invalid_park`, ...).

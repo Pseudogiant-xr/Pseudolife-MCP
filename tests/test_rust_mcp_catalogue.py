@@ -19,10 +19,34 @@ RERECORD = ("re-record with `python rust/daemon/harness/mcp_catalogue.py <port> 
             "rust/daemon/src/mcp` (see this module's docstring)")
 
 
+# Fields the Rust daemon serves differently on purpose, which the frozen
+# Python daemon (frozen since 14 November 2026) cannot follow: tool name ->
+# (wire field, then keys, of the one value), and why. The recorded value
+# replaces Python's before both comparisons, and must differ from it.
+DIVERGED = {
+    "document_ingest": (("inputSchema", "properties", "path", "description"),
+                        "the Rust daemon reads only from its documents directories"),
+}
+
+
 def _registry():
     from pseudolife_memory import mcp_server  # noqa: PLC0415 — lazy import.
 
-    tools = asyncio.run(mcp_server.mcp.list_tools())
+    # Copies: the registry's own tool objects stay as Python registered them.
+    tools = [t.model_copy(deep=True) for t in asyncio.run(mcp_server.mcp.list_tools())]
+    recorded = {json.loads(line)["name"]: json.loads(line) for line in
+                (CATALOGUE / "tools.jsonl").read_text(encoding="utf-8").splitlines() if line}
+    for tool in tools:
+        if tool.name not in DIVERGED:
+            continue
+        (field, *keys), _why = DIVERGED[tool.name]
+        want = recorded[tool.name][field]
+        # The wire name's model attribute (inputSchema -> input_schema).
+        target = getattr(tool, {"inputSchema": "input_schema"}.get(field, field))
+        for key in keys[:-1]:
+            want, target = want[key], target[key]
+        assert target[keys[-1]] != want[keys[-1]], f"{tool.name}: stale DIVERGED entry"
+        target[keys[-1]] = want[keys[-1]]
     return mcp_server, tools
 
 
