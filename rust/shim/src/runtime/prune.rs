@@ -1,8 +1,10 @@
 use super::*;
 use std::collections::BTreeSet;
 
-/// `(pid, parent pid, image)`. An empty image records a Windows PID whose
-/// image could not be opened; it supplies tunnel liveness, never a path pin.
+/// `(pid, parent pid, image)`. An empty image records a PID whose image could
+/// not be read (a Windows process that refuses `OpenProcess`, a Linux process
+/// whose `exe` link refuses this account); it supplies tunnel liveness, never
+/// a path pin, and the exclusive usage lock decides removal.
 pub type Process = (u32, u32, PathBuf);
 #[derive(Clone, Debug)]
 pub struct Evidence {
@@ -52,6 +54,14 @@ fn verify_process_evidence(rows: &mut Vec<Process>) -> Result<()> {
         // the actual image as well, including native paths containing spaces.
         match fs::read_link(path.join("exe")) {
             Ok(image) => rows.push((pid, 0, image)),
+            // A same-account process that made itself non-dumpable (ssh-agent,
+            // gpg-agent, a browser sandbox) refuses its `exe` link. As on
+            // Windows, keep its pid for tunnel liveness and let the exclusive
+            // usage lock decide, since every process running a native runtime
+            // holds that lock shared for its whole life.
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+                rows.push((pid, 0, PathBuf::new()));
+            }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 let stat = fs::read_to_string(path.join("stat"));
                 match stat {
