@@ -52,7 +52,7 @@ pub(super) async fn promote(
         };
         let claim = format!("{} {} {value}", slot.entity, slot.attribute);
         let Ok(embedding) =
-            crate::fact_set::embed(ready, super::py_strip(&claim).to_string()).await
+            crate::fact_set::embed_held(ready, super::py_strip(&claim).to_string()).await
         else {
             continue;
         };

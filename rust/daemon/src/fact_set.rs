@@ -203,9 +203,27 @@ pub(crate) async fn admit_write_embed() -> tokio::sync::SemaphorePermit<'static>
         .expect("the write embedding gate is never closed")
 }
 
+/// A write-side embedding computed before the write lock, through the gate.
 pub(crate) async fn embed(ready: &Ready, text: String) -> Result<Arc<[f32]>, ToolError> {
-    let embedder = ready.embedder.clone();
     let _admitted = admit_write_embed().await;
+    embed_now(ready.embedder.clone(), text).await
+}
+
+/// A write-side embedding for a caller that already holds the write lock
+/// (auto-promotion, a world fact's write, a curation snapshot restore, the
+/// dream's slot resolution when the slot vanished since its first look). It
+/// skips the gate: the gate admits waiting writers first come, first served,
+/// so a lock holder queued there would keep the lock through every queued
+/// writer's forward pass. Only one task holds the lock, so this parks at
+/// most one more blocking-pool thread on the model.
+pub(crate) async fn embed_held(ready: &Ready, text: String) -> Result<Arc<[f32]>, ToolError> {
+    embed_now(ready.embedder.clone(), text).await
+}
+
+async fn embed_now(
+    embedder: Arc<crate::embed::Embedder>,
+    text: String,
+) -> Result<Arc<[f32]>, ToolError> {
     let row = tokio::task::spawn_blocking(move || embedder.embed(&text))
         .await
         .map_err(internal_cause)?

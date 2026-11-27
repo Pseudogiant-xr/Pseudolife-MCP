@@ -13,7 +13,7 @@ use serde_json::{Map, Value, json};
 
 use crate::board::text::py_strip;
 use crate::episodes::Caller;
-use crate::fact_set::{embed, internal};
+use crate::fact_set::{embed_held, internal};
 use crate::mcp::dispatch::{ToolCall, ToolError, ToolFn, ToolFuture};
 use crate::read::cortex_search::{apply_stale_policy, ttl};
 use crate::read::mcp_search::CORRECTION_NOTE;
@@ -208,7 +208,7 @@ pub(crate) async fn write_locked(
     a: &WorldWriteArgs<'_>,
 ) -> Result<(&'static str, usize), ToolError> {
     let text = format!("{} {} {}", a.entity, a.attribute, a.value);
-    let embedding = embed(ready, py_strip(&text).to_string()).await?;
+    let embedding = embed_held(ready, py_strip(&text).to_string()).await?;
     let session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
     let hlc = ready.tick_hlc();
     let now = crate::episodes::now();

@@ -769,7 +769,7 @@ async fn resolve_dream_slot(
     // the slot looks unknown; the lookup is repeated under the lock, which
     // is what decides.
     let early = if ready.cortex.snapshot().lookup(entity, attribute).is_none() {
-        Some(embed_slot_text(ready, &text).await)
+        Some(embed_slot_text(ready, &text, false).await)
     } else {
         None
     };
@@ -780,7 +780,7 @@ async fn resolve_dream_slot(
     // A slot that disappeared since the first look is embedded here.
     let embedded = match early {
         Some(e) => e,
-        None => embed_slot_text(ready, &text).await,
+        None => embed_slot_text(ready, &text, true).await,
     };
     match embedded {
         Ok(emb) => resolve_slot(&ready.cortex.snapshot(), &emb, threshold).unwrap_or(original),
@@ -792,16 +792,21 @@ async fn resolve_dream_slot(
 }
 
 /// The resolver's slot embedding, or why the embedder refused the text (the
-/// caller logs it only if it would have used the embedding).
-async fn embed_slot_text(ready: &Arc<Ready>, text: &str) -> Result<Arc<[f32]>, String> {
+/// caller logs it only if it would have used the embedding). `held`: the
+/// caller holds the write lock (`fact_set::embed_held`).
+async fn embed_slot_text(ready: &Arc<Ready>, text: &str, held: bool) -> Result<Arc<[f32]>, String> {
     // The embedder's tokenizer refuses a lone surrogate (a TypeError in
     // Python), which this resolver swallows.
     if let Some(e) = super::extractor::unencodable(&[text]) {
         return Err(e);
     }
-    crate::fact_set::embed(ready, text.to_string())
-        .await
-        .map_err(|e| format!("{e:?}"))
+    let text = text.to_string();
+    let embedded = if held {
+        crate::fact_set::embed_held(ready, text).await
+    } else {
+        crate::fact_set::embed(ready, text).await
+    };
+    embedded.map_err(|e| format!("{e:?}"))
 }
 
 // ---------------------------------------------------------------------------

@@ -203,7 +203,8 @@ pub(crate) async fn lesson_write(
     crate::forget_tools::ensure_lessons_refreshed(ready)
         .await
         .map_err(internal)?;
-    let embedding = crate::fact_set::embed(ready, embed_text(a.task, a.aspect, a.lesson)).await?;
+    let embedding =
+        crate::fact_set::embed_held(ready, embed_text(a.task, a.aspect, a.lesson)).await?;
     let session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
     let hlc = ready.tick_hlc();
     let w = LessonWrite {
