@@ -483,20 +483,15 @@ mod tests {
         }
     }
 
-    /// The live lookup on this host still answers: the account name Windows
-    /// reports, which `USERNAME` also names for an interactive or SSH logon
-    /// (a service account's `USERNAME` is the machine account, `<name>$`).
+    /// The live lookup on this host still answers with a name and an absolute
+    /// Roaming folder. `USERNAME` is no oracle: it is inherited and can name
+    /// another account than the one this process runs as.
     #[cfg(windows)]
     #[test]
     fn the_live_windows_default_user_is_this_account() {
         let (user, home) = platform_defaults();
         let user = user.expect("this account has a name");
         assert!(!user.is_empty());
-        if let Ok(expected) = std::env::var("USERNAME")
-            && !expected.ends_with('$')
-        {
-            assert!(user.eq_ignore_ascii_case(&expected), "{user} vs {expected}");
-        }
         let home = home.expect("this account has a Roaming folder");
         assert!(home.is_absolute(), "{}", home.display());
     }
