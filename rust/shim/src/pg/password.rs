@@ -135,49 +135,93 @@ fn platform_defaults() -> (Option<String>, Option<PathBuf>) {
 #[cfg(windows)]
 #[allow(unsafe_code)]
 fn platform_defaults() -> (Option<String>, Option<PathBuf>) {
-    use std::{ffi::OsString, os::windows::ffi::OsStringExt};
     use windows_sys::Win32::{
-        Globalization::{CP_ACP, MultiByteToWideChar},
-        System::WindowsProgramming::GetUserNameA,
-        UI::Shell::{CSIDL_APPDATA, SHGFP_TYPE_CURRENT, SHGetFolderPathA},
+        System::WindowsProgramming::GetUserNameW,
+        UI::Shell::{CSIDL_APPDATA, SHGFP_TYPE_CURRENT, SHGetFolderPathW},
     };
-    let mut username = [0; 257];
+    // UNLEN + 1 UTF-16 units.
+    let mut username = [0u16; 257];
     let mut count = username.len() as u32;
-    let user = unsafe {
-        (GetUserNameA(username.as_mut_ptr(), &mut count) != 0)
-            .then(|| username.iter().position(|byte| *byte == 0))
-            .flatten()
-            .and_then(|length| String::from_utf8(username[..length].to_vec()).ok())
-    };
-    let mut path = [0; 260];
+    let user = unsafe { GetUserNameW(username.as_mut_ptr(), &mut count) != 0 }
+        .then(|| user_from_wide(&username))
+        .flatten();
+    let mut path = [0u16; 260];
     // The source contract is Shell32's current caller Roaming AppData folder.
     // APPDATA environment redirection does not bind this lookup.
     let home = unsafe {
-        if SHGetFolderPathA(
+        SHGetFolderPathW(
             std::ptr::null_mut(),
             CSIDL_APPDATA as i32,
             std::ptr::null_mut(),
             SHGFP_TYPE_CURRENT as u32,
             path.as_mut_ptr(),
-        ) != 0
-        {
-            None
-        } else {
-            path.iter().position(|byte| *byte == 0).and_then(|length| {
-                let mut wide = [0; 260];
-                let written = MultiByteToWideChar(
-                    CP_ACP,
-                    0,
-                    path.as_ptr(),
-                    length as i32,
-                    wide.as_mut_ptr(),
-                    wide.len() as i32,
-                );
-                (written > 0).then(|| PathBuf::from(OsString::from_wide(&wide[..written as usize])))
-            })
-        }
-    };
+        ) == 0
+    }
+    .then(|| path_from_wide(&path))
+    .flatten();
     (user, home)
+}
+
+/// The account name in `buffer` (NUL-terminated UTF-16), as the default
+/// PostgreSQL user.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn user_from_wide(buffer: &[u16]) -> Option<String> {
+    String::from_utf8(ansi_bytes(until_nul(buffer)?)?).ok()
+}
+
+/// The folder in `buffer` (NUL-terminated UTF-16).
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn path_from_wide(buffer: &[u16]) -> Option<PathBuf> {
+    use std::{ffi::OsString, os::windows::ffi::OsStringExt};
+    use windows_sys::Win32::Globalization::{CP_ACP, MultiByteToWideChar};
+    let bytes = ansi_bytes(until_nul(buffer)?)?;
+    let mut wide = [0; 260];
+    let written = unsafe {
+        MultiByteToWideChar(
+            CP_ACP,
+            0,
+            bytes.as_ptr(),
+            bytes.len() as i32,
+            wide.as_mut_ptr(),
+            wide.len() as i32,
+        )
+    };
+    (written > 0).then(|| PathBuf::from(OsString::from_wide(&wide[..written as usize])))
+}
+
+/// What the ANSI calls (`GetUserNameA`, `SHGetFolderPathA`) return for this
+/// text: its bytes in the system code page.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn ansi_bytes(wide: &[u16]) -> Option<Vec<u8>> {
+    use windows_sys::Win32::Globalization::{CP_ACP, WideCharToMultiByte};
+    if wide.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut bytes = vec![0u8; wide.len() * 4];
+    let written = unsafe {
+        WideCharToMultiByte(
+            CP_ACP,
+            0,
+            wide.as_ptr(),
+            wide.len() as i32,
+            bytes.as_mut_ptr(),
+            bytes.len() as i32,
+            std::ptr::null(),
+            std::ptr::null_mut(),
+        )
+    };
+    (written > 0).then(|| {
+        bytes.truncate(written as usize);
+        bytes
+    })
+}
+
+#[cfg(windows)]
+fn until_nul(buffer: &[u16]) -> Option<&[u16]> {
+    Some(&buffer[..buffer.iter().position(|unit| *unit == 0)?])
 }
 
 pub(super) fn configure(
@@ -435,6 +479,57 @@ mod tests {
     }
     fn resolve(text: &str, environment: &PasswordEnvironment) -> tokio_postgres::Config {
         configure(&Dsn::parse(text).unwrap(), environment).unwrap()
+    }
+
+    #[cfg(windows)]
+    fn wide(text: &str) -> Vec<u16> {
+        text.encode_utf16().chain([0, 0x41]).collect()
+    }
+
+    /// A non-ASCII account name is the default user as Windows spells it,
+    /// both inside the system code page (`José`) and outside it (`李雷`).
+    #[cfg(windows)]
+    #[test]
+    fn a_non_ascii_windows_account_name_is_the_default_user() {
+        for name in ["José", "李雷", "Ωmega", "fixture_user"] {
+            assert_eq!(user_from_wide(&wide(name)).as_deref(), Some(name), "{name}");
+        }
+        assert_eq!(user_from_wide(&[0x41, 0x42]), None, "no terminator");
+    }
+
+    /// The Roaming AppData folder of such an account keeps its real name, so
+    /// the default password file is the one in that profile.
+    #[cfg(windows)]
+    #[test]
+    fn a_non_ascii_profile_folder_keeps_its_name() {
+        for folder in [
+            r"C:\Users\José\AppData\Roaming",
+            r"C:\Users\李雷\AppData\Roaming",
+        ] {
+            assert_eq!(
+                path_from_wide(&wide(folder)),
+                Some(PathBuf::from(folder)),
+                "{folder}"
+            );
+            assert_eq!(
+                default_file(path_from_wide(&wide(folder)).unwrap()),
+                Path::new(folder).join("postgresql").join("pgpass.conf")
+            );
+        }
+    }
+
+    /// The live lookup on this host still answers: the account name Windows
+    /// reports, which `USERNAME` also names for an interactive or SSH logon.
+    #[cfg(windows)]
+    #[test]
+    fn the_live_windows_default_user_is_this_account() {
+        let (user, home) = platform_defaults();
+        let user = user.expect("this account has a name");
+        assert!(!user.is_empty());
+        if let Ok(expected) = std::env::var("USERNAME") {
+            assert!(user.eq_ignore_ascii_case(&expected), "{user} vs {expected}");
+        }
+        assert!(home.expect("this account has a Roaming folder").is_absolute());
     }
 
     #[test]
