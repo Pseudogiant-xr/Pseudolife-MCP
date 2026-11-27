@@ -682,6 +682,14 @@ async fn store_body(
         .map_err(|e| ToolError::Internal(e.to_string()))?
         .map_err(|e| ToolError::Internal(e.to_string()))?;
     drop(admitted);
+    // So are the auto-promoted slots' claims (opt-in); a store that is then
+    // filtered as meta text promotes nothing, and its slots' passes are spent.
+    let promote = cfg.cortex.enabled && cfg.cortex_auto_promote;
+    let slots = if promote {
+        promotion::prepare(ready, text).await
+    } else {
+        Vec::new()
+    };
     let mut ws = ready.write.lock().await;
     let client = ready.storage.client();
     let mut session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
@@ -718,33 +726,32 @@ async fn store_body(
     } else {
         "rejected"
     });
-    let promoted =
-        if cfg.cortex.enabled && cfg.cortex_auto_promote && reason != Some("filtered_meta") {
-            let promoted = promotion::promote(
-                svc,
-                ready,
-                cfg,
-                promotion::Input {
-                    text,
-                    source,
-                    origin: arg_str(args, "origin"),
-                    writer,
-                    // An episode handle redirects the entry, not the fact's writer context.
-                    session: ws.resolve_session(caller).map_err(ToolError::Invalid)?,
-                    authority: auth.clone(),
-                    distortion: dt.clone(),
-                },
-            )
-            .await;
-            if promoted > 0 {
-                crate::fact_set::save_cortex(svc, ready)
-                    .await
-                    .map_err(|e| ToolError::Internal(format!("{e:?}")))?;
-            }
-            promoted
-        } else {
-            0
-        };
+    let promoted = if promote && reason != Some("filtered_meta") {
+        let promoted = promotion::promote(
+            svc,
+            ready,
+            cfg,
+            promotion::Input {
+                source,
+                origin: arg_str(args, "origin"),
+                writer,
+                // An episode handle redirects the entry, not the fact's writer context.
+                session: ws.resolve_session(caller).map_err(ToolError::Invalid)?,
+                authority: auth.clone(),
+                distortion: dt.clone(),
+            },
+            slots,
+        )
+        .await;
+        if promoted > 0 {
+            crate::fact_set::save_cortex(svc, ready)
+                .await
+                .map_err(|e| ToolError::Internal(format!("{e:?}")))?;
+        }
+        promoted
+    } else {
+        0
+    };
     out.insert("stored".into(), json!(stored));
     out.insert(
         "surprise".into(),

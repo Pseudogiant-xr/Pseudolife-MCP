@@ -1,6 +1,11 @@
 //! `MemoryService._promote_slots`: deterministic slot writes under the caller's
 //! existing service write lock. These deliberately bypass `cortex_write`'s
 //! inferred freshness, slot embedding and correction-signal side effects.
+//! The slots and their claim embeddings depend on the stored text alone, so
+//! `prepare` computes them before the write lock and `promote` writes them
+//! under it.
+
+use std::sync::Arc;
 
 use crate::config::MemoryConfig;
 use crate::labels::Resolved;
@@ -8,7 +13,6 @@ use crate::service::{Ready, Service};
 use crate::stores::cortex_write::{FactWrite, norm_support};
 
 pub(super) struct Input<'a> {
-    pub text: &'a str,
     pub source: &'a str,
     pub origin: Option<&'a str>,
     pub writer: &'a str,
@@ -26,20 +30,22 @@ fn source_origin(source: &str) -> Option<&'static str> {
     }
 }
 
-pub(super) async fn promote(
-    svc: &Service,
-    ready: &Ready,
-    cfg: &MemoryConfig,
-    a: Input<'_>,
-) -> usize {
-    let support = norm_support(a.origin.or_else(|| source_origin(a.source)));
-    let provenance = if a.source.is_empty() {
-        Vec::new()
-    } else {
-        vec![a.source.to_string()]
-    };
-    let mut written = 0;
-    for slot in crate::slots::extract_slots(a.text, None) {
+/// One slot of the stored text, its value as promoted and its claim's
+/// embedding.
+pub(super) struct Slot {
+    entity: String,
+    attribute: String,
+    value: String,
+    embedding: Arc<[f32]>,
+}
+
+/// The slots `promote` writes, before the write lock: every slot extracted
+/// from `text` but a session's handoff, whose value is `NOT <value>` for a
+/// negated slot, with the embedding of `"{entity} {attribute} {value}"`. A
+/// slot whose claim the embedder refuses is skipped, as before.
+pub(super) async fn prepare(ready: &Ready, text: &str) -> Vec<Slot> {
+    let mut slots = Vec::new();
+    for slot in crate::slots::extract_slots(text, None) {
         // A session's handoff slot is written only by name, never derived
         // from stored text.
         if crate::session_handoff::is_handoff_entity(&slot.entity) {
@@ -52,16 +58,43 @@ pub(super) async fn promote(
         };
         let claim = format!("{} {} {value}", slot.entity, slot.attribute);
         let Ok(embedding) =
-            crate::fact_set::embed_held(ready, super::py_strip(&claim).to_string()).await
+            crate::fact_set::embed(ready, super::py_strip(&claim).to_string()).await
         else {
             continue;
         };
+        slots.push(Slot {
+            entity: slot.entity,
+            attribute: slot.attribute,
+            value,
+            embedding,
+        });
+    }
+    slots
+}
+
+/// Write the prepared slots, under the caller's write lock: one HLC tick,
+/// store write and subject-entity mint each. Returns how many were written.
+pub(super) async fn promote(
+    svc: &Service,
+    ready: &Ready,
+    cfg: &MemoryConfig,
+    a: Input<'_>,
+    slots: Vec<Slot>,
+) -> usize {
+    let support = norm_support(a.origin.or_else(|| source_origin(a.source)));
+    let provenance = if a.source.is_empty() {
+        Vec::new()
+    } else {
+        vec![a.source.to_string()]
+    };
+    let mut written = 0;
+    for slot in slots {
         let w = FactWrite {
             entity: &slot.entity,
             attribute: &slot.attribute,
-            value: &value,
+            value: &slot.value,
             raw: Default::default(),
-            embedding,
+            embedding: slot.embedding.clone(),
             slot_embedding: None,
             confidence: cfg.cortex_promote_confidence,
             support,

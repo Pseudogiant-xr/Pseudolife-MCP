@@ -210,12 +210,12 @@ pub(crate) async fn embed(ready: &Ready, text: String) -> Result<Arc<[f32]>, Too
 }
 
 /// A write-side embedding for a caller that already holds the write lock
-/// (auto-promotion, a world fact's write, a curation snapshot restore, the
-/// dream's slot resolution when the slot vanished since its first look). It
-/// skips the gate: the gate admits waiting writers first come, first served,
-/// so a lock holder queued there would keep the lock through every queued
-/// writer's forward pass. Only one task holds the lock, so this parks at
-/// most one more blocking-pool thread on the model.
+/// (a curation snapshot restore, the dream's slot resolution when the slot
+/// vanished since its first look). It skips the gate: the gate admits
+/// waiting writers first come, first served, so a lock holder queued there
+/// would keep the lock through every queued writer's forward pass. Only one
+/// task holds the lock, so this parks at most one more blocking-pool thread
+/// on the model.
 pub(crate) async fn embed_held(ready: &Ready, text: String) -> Result<Arc<[f32]>, ToolError> {
     embed_now(ready.embedder.clone(), text).await
 }

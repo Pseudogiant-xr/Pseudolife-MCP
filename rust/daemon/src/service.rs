@@ -2051,10 +2051,11 @@ mod tests {
         identity.await.unwrap();
     }
 
-    /// A store, a fact write and a set add embed their text before taking
-    /// the write lock: with the lock held elsewhere, all four forward passes
-    /// (the fact write embeds the claim and the slot) still run, and the
-    /// writes finish once it is released.
+    /// A store (with its auto-promoted slot), a fact write, a set add, a
+    /// world fact, a supersede and a consolidation embed their text before
+    /// taking the write lock: with the lock held elsewhere, all eight forward
+    /// passes (the fact write embeds the claim and the slot) still run, and
+    /// the writes finish once it is released.
     #[tokio::test]
     #[ignore = "run by startup_ci.py with PostgreSQL and the offline embedder"]
     async fn writes_embed_before_taking_the_write_lock() {
@@ -2065,6 +2066,8 @@ mod tests {
             PathBuf::from(std::env::var_os("PL_SHADOW_EMBED_FIXTURE").expect("offline embedder"));
         let mut config = Config::default();
         config.embedding.model_name = "pseudolife-test/write-lock-fixture".into();
+        // The store's derived slot is promoted too (one more pass).
+        config.memory.cortex_auto_promote = true;
         let service = Arc::new(Service::new(
             config,
             DaemonEnv::from_env(&|_| None).unwrap(),
@@ -2113,11 +2116,23 @@ mod tests {
                 .await
             })
         };
-        let writes = [
+        // A correction's argument error answers before its embedding, so
+        // without a forward pass and without waiting for the lock.
+        let refused = tokio::time::timeout(
+            Duration::from_secs(10),
             call(
-                "memory_store",
-                json!({"text": "The write lock fixture stores one entry."}),
+                "memory_supersede",
+                json!({"new_text": "A replacement nobody selected."}),
             ),
+        )
+        .await
+        .expect("a correction with no selector waited for the write lock")
+        .unwrap()
+        .unwrap();
+        assert_eq!(refused["reason"], "invalid_selector");
+        assert_eq!(ready.embedder.forwards().unwrap(), before);
+        let writes = [
+            call("memory_store", json!({"text": "I have a cat named Jacque"})),
             call(
                 "memory_fact_set",
                 json!({"entity": "Lock Fixture", "attribute": "owner", "value": "nobody"}),
@@ -2126,9 +2141,27 @@ mod tests {
                 "memory_set_add",
                 json!({"entity": "Lock Fixture", "attribute": "members", "member": "first"}),
             ),
+            call(
+                "memory_world_set",
+                json!({"entity": "Lock Fixture", "attribute": "site", "value": "example",
+                       "source_url": "https://example.com/fixture", "source_quote": "example"}),
+            ),
+            // The replacement is embedded before its targets are looked up,
+            // so a missing target still costs its pass.
+            call(
+                "memory_supersede",
+                json!({"old_text": "No entry has this text.", "new_text": "A replacement."}),
+            ),
+            call(
+                "memory_consolidate",
+                json!({"replaces": ["No entry has this text either."],
+                       "new_text": "A consolidation."}),
+            ),
         ];
+        // store 2 (entry, promoted slot), fact_set 2, set_add, world_set,
+        // supersede and consolidate 1 each.
         let embedded = tokio::time::timeout(Duration::from_secs(20), async {
-            while ready.embedder.forwards().unwrap() < before + 4 {
+            while ready.embedder.forwards().unwrap() < before + 8 {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })

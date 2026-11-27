@@ -116,16 +116,14 @@ fn int_value(v: &Value) -> (bool, Option<i64>) {
     }
 }
 
-/// `_resolve_correction_targets_locked` (`service.py:3104-3199`): every
-/// selector resolved, or the no-op answer. Exactly one of `texts` and `ids`
-/// is given; a list is deduplicated in first-seen order (`dict.fromkeys`),
-/// and every selector's error is reported. No write, no retrieval effect.
-async fn resolve_targets(
-    ready: &Ready,
-    cfg: &MemoryConfig,
-    texts: Option<&[Value]>,
-    ids: Option<&[Value]>,
-) -> Result<Vec<Target>, Value> {
+/// The argument checks of `_resolve_correction_targets_locked`: exactly
+/// one selector kind, non-empty, integer ids or non-empty strings. They read
+/// nothing, so the correction tools run them before embedding. Returns
+/// whether the selectors are ids, and the selectors.
+fn check_selectors<'a>(
+    texts: Option<&'a [Value]>,
+    ids: Option<&'a [Value]>,
+) -> Result<(bool, &'a [Value]), Value> {
     let (by_id, selectors) = match (texts, ids) {
         (Some(t), None) => (false, t),
         (None, Some(i)) => (true, i),
@@ -171,6 +169,20 @@ async fn resolve_targets(
             vec![],
         ));
     }
+    Ok((by_id, selectors))
+}
+
+/// `_resolve_correction_targets_locked` (`service.py:3104-3199`): every
+/// selector resolved, or the no-op answer. Exactly one of `texts` and `ids`
+/// is given; a list is deduplicated in first-seen order (`dict.fromkeys`),
+/// and every selector's error is reported. No write, no retrieval effect.
+async fn resolve_targets(
+    ready: &Ready,
+    cfg: &MemoryConfig,
+    texts: Option<&[Value]>,
+    ids: Option<&[Value]>,
+) -> Result<Vec<Target>, Value> {
+    let (by_id, selectors) = check_selectors(texts, ids)?;
     let mut distinct: Vec<&Value> = Vec::with_capacity(selectors.len());
     for v in selectors {
         if crate::mutants::active("mcp-consolidate-no-dedupe") || !distinct.contains(&v) {
@@ -412,7 +424,6 @@ pub(crate) async fn supersede(
     caller: &Caller,
     args: &Map<String, Value>,
 ) -> Result<Value, ToolError> {
-    let mut ws = ready.write.lock().await;
     let new_text = py_strip(args.get("new_text").and_then(Value::as_str).unwrap_or(""));
     if new_text.is_empty() {
         return Ok(noop(
@@ -430,6 +441,11 @@ pub(crate) async fn supersede(
         .get("entry_id")
         .filter(|v| !v.is_null())
         .map(|v| vec![v.clone()]);
+    if let Err(answer) = check_selectors(old_text.as_deref(), entry_id.as_deref()) {
+        return Ok(answer);
+    }
+    let row = embed_replacement(ready, new_text).await?;
+    let mut ws = ready.write.lock().await;
     let targets = match resolve_targets(ready, cfg, old_text.as_deref(), entry_id.as_deref()).await
     {
         Ok(t) => t,
@@ -441,7 +457,10 @@ pub(crate) async fn supersede(
         tags: Vec::new(),
         report_derivations: true,
     };
-    apply_correction(ready, cfg, &mut ws, caller, targets, new_text, correction).await
+    apply_correction(
+        ready, cfg, &mut ws, caller, targets, new_text, row, correction,
+    )
+    .await
 }
 
 /// `service.consolidate` (`service.py:7462-7519`): a list of targets, by ids
@@ -453,7 +472,6 @@ pub(crate) async fn consolidate(
     caller: &Caller,
     args: &Map<String, Value>,
 ) -> Result<Value, ToolError> {
-    let mut ws = ready.write.lock().await;
     let new_text = py_strip(args.get("new_text").and_then(Value::as_str).unwrap_or(""));
     if new_text.is_empty() {
         return Ok(noop(
@@ -477,6 +495,11 @@ pub(crate) async fn consolidate(
     fn slice(v: Option<&Value>) -> Option<&[Value]> {
         v.map(|v| v.as_array().map_or(&[][..], Vec::as_slice))
     }
+    if let Err(answer) = check_selectors(slice(replaces), slice(entry_ids)) {
+        return Ok(answer);
+    }
+    let row = embed_replacement(ready, new_text).await?;
+    let mut ws = ready.write.lock().await;
     let targets = match resolve_targets(ready, cfg, slice(replaces), slice(entry_ids)).await {
         Ok(t) => t,
         Err(answer) => return Ok(answer),
@@ -515,7 +538,23 @@ pub(crate) async fn consolidate(
         tags: store::normalize_tags(Some(&tags)),
         report_derivations: crate::mutants::active("mcp-consolidate-derived-keys"),
     };
-    apply_correction(ready, cfg, &mut ws, caller, targets, new_text, correction).await
+    apply_correction(
+        ready, cfg, &mut ws, caller, targets, new_text, row, correction,
+    )
+    .await
+}
+
+/// The replacement's embedding, which depends on its text alone, so the
+/// correction tools compute it before the write lock (through the write
+/// embedding gate, `fact_set::admit_write_embed`).
+async fn embed_replacement(ready: &Ready, text: &str) -> Result<Vec<f32>, ToolError> {
+    let embedder = ready.embedder.clone();
+    let owned = text.to_string();
+    let _admitted = crate::fact_set::admit_write_embed().await;
+    tokio::task::spawn_blocking(move || embedder.embed(&owned))
+        .await
+        .map_err(internal)?
+        .map_err(internal)
 }
 
 /// What distinguishes one correction tool's store from another's.
@@ -528,8 +567,10 @@ struct Correction<'a> {
 }
 
 /// `_apply_correction_under_mutation_lock_locked` (`service.py:2927-3102`):
-/// retire every target and store the replacement in one transaction, then
-/// publish to the resident bank. The caller holds the service lock (`ws`).
+/// retire every target and store the replacement (its embedding `row`) in
+/// one transaction, then publish to the resident bank. The caller holds the
+/// service lock (`ws`).
+#[allow(clippy::too_many_arguments)]
 async fn apply_correction(
     ready: &Arc<Ready>,
     cfg: &MemoryConfig,
@@ -537,6 +578,7 @@ async fn apply_correction(
     caller: &Caller,
     targets: Vec<Target>,
     new_text: &str,
+    row: Vec<f32>,
     correction: Correction<'_>,
 ) -> Result<Value, ToolError> {
     // `_inherited_labels` (`service.py:682-692`): the new text's own label
@@ -562,12 +604,6 @@ async fn apply_correction(
                 &DISTORTION_RANK,
             )
         });
-    let embedder = ready.embedder.clone();
-    let owned = new_text.to_string();
-    let row = tokio::task::spawn_blocking(move || embedder.embed(&owned))
-        .await
-        .map_err(internal)?
-        .map_err(internal)?;
     let session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
     let ids: Vec<i64> = targets.iter().map(|t| t.id).collect();
     let new = NewEntry {
