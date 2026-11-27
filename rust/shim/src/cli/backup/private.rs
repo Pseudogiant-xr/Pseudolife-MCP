@@ -15,14 +15,24 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// How `pg_dump` is pointed at the bank.
-#[derive(Debug, PartialEq, Eq)]
+/// How `pg_dump` is pointed at the bank. Its `Debug` never shows the
+/// password, so no panic or log line can carry it.
+#[derive(PartialEq, Eq)]
 pub(super) struct Connection {
     /// The `--dbname` argument, `None` when nothing but secrets was given
     /// (libpq then takes the database from its environment, as before).
     pub dbname: Option<String>,
     /// The `password` libpq would have used, for `PGPASSWORD`.
     pub password: Option<OsString>,
+}
+
+impl std::fmt::Debug for Connection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Connection")
+            .field("has_dbname", &self.dbname.is_some())
+            .field("has_password", &self.password.is_some())
+            .finish()
+    }
 }
 
 /// The `pg_dump` connection for `dsn`; `pgservice` says `PGSERVICE` is set.
@@ -164,8 +174,7 @@ mod tests {
             "host=db oauth_client_secret=s",
         ] {
             let error = super::pg_dump_connection(dsn, false).unwrap_err();
-            // The message names the key, never the value.
-            assert!(error.contains("service=<name>"), "{error}");
+            assert!(error.contains("service=<name>"));
         }
     }
 
@@ -177,7 +186,7 @@ mod tests {
             ("postgresql://owner:pw@db/bank", true),
         ] {
             let error = super::pg_dump_connection(dsn, pgservice).unwrap_err();
-            assert!(error.contains("in that service's entry instead"), "{error}");
+            assert!(error.contains("in that service's entry instead"));
         }
         // A service with no password in the string is left to libpq.
         assert_eq!(
