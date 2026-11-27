@@ -90,8 +90,8 @@ fi
 command -v systemctl >/dev/null 2>&1 || {
     echo "systemctl not found — run the shim manually instead:" >&2
     if [ -n "$NATIVE_EXE" ]; then
-        printf '  %q' "$NATIVE_EXE" extractor-shim claude --repo "$repo" --port "$PORT" --model "$MODEL" --prompt-file "$repo/$PROMPT_FILE" >&2
-        echo >&2
+        printf -v manual_shim '%q ' "$NATIVE_EXE" extractor-shim claude --repo "$repo" --port "$PORT" --model "$MODEL" --prompt-file "$repo/$PROMPT_FILE"
+        echo "  ${manual_shim% }" >&2
     elif [ -n "$host_python" ]; then
         echo "  python $repo/evals/claude_shim.py --port $PORT --model $MODEL --system-prompt-file $repo/$PROMPT_FILE" >&2
     else

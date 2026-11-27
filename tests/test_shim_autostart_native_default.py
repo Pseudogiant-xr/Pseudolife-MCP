@@ -55,7 +55,7 @@ def _stub(path: Path, answer: str = CAPABILITY) -> Path:
         path.write_text(
             f"#!{shutil.which('bash')}\n"
             f'if [ "$1 $2" = "update --native-capability" ]; then echo "{answer}"; exit 0; fi\n'
-            'printf "%s\\n" "$@" > "$(dirname "$0")/launcher-args"\n',
+            'printf "%s\\n" "$@" > "${0%/*}/launcher-args"\n',
             encoding="utf-8",
         )
         path.chmod(0o755)
