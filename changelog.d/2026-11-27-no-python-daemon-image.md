@@ -1,2 +1,0 @@
-### Removed (2026-11-27 — releases no longer publish the retired Python daemon image)
-- From 0.26.0 the release workflow no longer builds or pushes `ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>` or moves its `latest` tag, and `RELEASE-READY.json` maps only the `pseudolife-pg` and `pseudolife-daemon-rust` digests. Earlier Python image tags stay in GHCR, and legacy bank imports still run the archived 0.23.1 image by digest. The Rust daemon image, the PostgreSQL image and the readiness marker are published as before.

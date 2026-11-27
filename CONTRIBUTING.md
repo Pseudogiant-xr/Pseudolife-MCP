@@ -220,8 +220,8 @@ instead (the tracked-tree and release-doc guards); the Rust workflow is
 that PR's gate. The master push of a Rust-only batch skips them too, and
 the next nightly run, on master's tip, runs the full suite. The Rust daemon under `rust/` is the
 default Docker engine for a release that publishes its image: a new install
-runs it, and a release-mode `pseudolife-mcp update` moves a host that never
-chose an engine to it (`--engine python` keeps the Python daemon; see
+runs it, and a release-mode `pseudolife-mcp update` moves every Docker host
+to it and refuses `--engine python`, because the Python daemon is retired (see
 [docs/guide/install-and-move.md](docs/guide/install-and-move.md)). In
 checkout mode `pseudolife-mcp update --engine rust --checkout <repo>`
 selects it, and `--shadow` runs it read-only beside the Python daemon
