@@ -36,17 +36,25 @@ models it refuses, names `--engine python`, and starts nothing; for a bank
 that already exists it installs on Python and then switches through update
 (below).
 
-A release-mode `pseudolife-mcp update` moves a Docker host that never
-chose an engine to the Rust daemon when the target release publishes its
-image. An ordinary update can move the host from a script, an SSH command
-or an agent's shell too. Before it downloads the models or backs
-anything up, the update asks the Rust image whether it supports this bank's configuration (`pseudolife-daemon
-check-config`: a non-default reranker or embedding model, for instance, is
-not). If that check, or anything else before the backup, refuses, the update
-removes what it pulled for the move, warns with the refusal and its fix,
-and continues on Python; nothing is recorded, so the next update tries
-again. `--engine python` keeps Python for good, and `--engine rust` refuses
-an unsupported configuration before the backup instead of falling back.
+A release-mode `pseudolife-mcp update` moves a Docker host still on the
+Python daemon to the Rust daemon: the Python daemon is retired and gets no
+more fixes, so no release update keeps it, whatever an earlier
+`--engine python` recorded. An ordinary update makes the move from a
+script, an SSH command or an agent's shell too. Before it downloads the
+models or backs anything up, the update asks the Rust image whether it
+supports this bank's configuration (`pseudolife-daemon check-config`: a
+non-default reranker or embedding model, for instance, is not). If that
+check, or anything else before the backup, refuses, the update removes what
+it pulled for the move and stops with the refusal and its fix; the Python
+daemon keeps running as it was, and the next update tries again once the
+cause is fixed. A release that publishes no Rust image is refused the same
+way. The scheduled `--unattended` update does not make the move: on a
+Python host it holds and asks for one attended `pseudolife-mcp update`.
+`--no-backup` is refused on a Python host, and `--engine python` is refused
+in release mode (a checkout deploy still takes it). The one run that stays
+on Python is the explicit bearer handover (`--allow-auth-change`): the move
+needs a bearer, so a Python daemon that runs without one first gets it that
+way, and the next attended update moves the host.
 The updater that deploys the daemon is the one already installed, so an
 update started from a release older than 0.23.0 installs the new release
 on the Python daemon. The next attended `pseudolife-mcp update` can move
@@ -1147,13 +1155,14 @@ the package in the interpreter that holds it (pip, or pipx) and restarts
 nothing: it says what to restart (a lite bank moves to Docker instead; see
 below).
 
-A Docker host that never chose a daemon engine moves to the Rust daemon on
-an update to a release that publishes its image, after the update has
-checked the configuration, downloaded the models and backed the bank up;
-if anything refuses before the backup the update continues on Python and
-says why. The scheduled `--unattended` update never changes the engine,
-`--engine python` keeps the Python daemon for good, and an update started
-from a release older than 0.23.0 moves the host on the next attended run
+A Docker host still on the retired Python daemon moves to the Rust daemon
+on its next attended update, after the update has checked the
+configuration, downloaded the models and backed the bank up; if anything
+refuses before the backup the update stops, says why, and leaves the
+Python daemon running as it was. The scheduled `--unattended` update holds
+on such a host until one attended `pseudolife-mcp update` makes the move,
+and an update started from a release older than 0.23.0 moves the host on
+the next attended run
 ([Daemon engine](docs/guide/install-and-move.md)).
 
 Docker update, backup and restore require at least **8 GiB free** on the
@@ -10106,7 +10115,7 @@ print.
 | `pseudolife-mcp update --tag <version>` | Use the specified published release and bypass latest-release discovery. |
 | `pseudolife-mcp update --check` | Report only. Exit 0 when a newer release exists, 3 when there is no newer eligible release, or 2 when the check fails. |
 | `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step (+ refreshing running saved tunnels), or the daemon; the steps after a newly installed shim runtime run in that runtime ([below](#the-client-steps-after-a-new-shim-runtime)). On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release; a silent or unversioned endpoint is refused, and `--daemon-only` is refused naming the daemon's host |
-| `--engine rust` / `--engine python` | Docker tier: select the daemon engine on the same bank, `/data` volume, port and bearer settings, and record the choice so later updates keep it. `--engine rust` needs a release that publishes the Rust image and refuses, before the backup, a configuration the Rust daemon does not support; `--engine python` switches back. An explicit engine change moves only the daemon, never the clients: run `pseudolife-mcp update --clients-only` afterwards if the clients are behind. Details: [Daemon engine](install-and-move.md) |
+| `--engine rust` / `--engine python` | Docker tier: select the daemon engine on the same bank, `/data` volume, port and bearer settings. In release mode only `--engine rust` is taken: the Python daemon is retired, so a release update keeps or moves a host to Rust and refuses `--engine python`. `--engine rust` needs a release that publishes the Rust image and refuses, before the backup, a configuration the Rust daemon does not support. A checkout deploy (`--checkout <repo>`) still selects either engine and records the choice. An explicit engine change moves only the daemon, never the clients: run `pseudolife-mcp update --clients-only` afterwards if the clients are behind. Details: [Daemon engine](install-and-move.md) |
 | `--reinstall` | recreate the daemon at the version it already runs, and install the shim runtime again when the current one is already that release (without it the shim step reports `current`, unless one of that runtime's installed requirements is outside the range its own `pseudolife-mcp` declares, as an mcp 2.1 runtime left by a 0.18.1 update is: then it installs again and says why); with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
 | `--allow-downgrade` | with `--tag`, allow a release older than the one the daemon runs (refused otherwise: the bank's schema may be newer than that release knows) |
 | `--env-file <path>` | the compose env file, when the one the container was created with is gone (without it the recreate would reset the Postgres password, the volume names and the bearer, so it stops instead) |

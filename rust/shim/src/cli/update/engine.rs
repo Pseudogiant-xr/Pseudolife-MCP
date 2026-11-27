@@ -9,14 +9,15 @@ pub(crate) const RELEASE_LABEL: &str = "org.pseudolife.release";
 pub(crate) fn release_accepted() -> PathBuf {
     data_dir().join("update-engine/docker-compose.release-accepted.json")
 }
-/// An explicit engine choice that left no activation (installer
-/// `--engine python`, or `update --engine python` with nothing to deploy),
-/// shared with the Python updater's `update-engine/engine-choice.json`.
+/// An explicit engine choice that left no activation (an earlier installer
+/// `--engine python`), shared with the Python updater's
+/// `update-engine/engine-choice.json`. A release update reads it only to say
+/// that it no longer applies: the Python daemon is retired.
 pub(super) fn choice_path() -> PathBuf {
     data_dir().join("update-engine/engine-choice.json")
 }
 /// `Ok(None)` only for a missing file; `Err(reason)` for one that cannot be
-/// read or holds no engine, which still keeps the host's choice.
+/// read or holds no engine.
 pub(super) fn recorded_choice() -> std::result::Result<Option<String>, String> {
     let bytes = match fs::read(choice_path()) {
         Ok(bytes) => bytes,
@@ -262,8 +263,12 @@ pub(super) fn daemon_token(config: &Value) -> Result<String> {
                 })
             })
         });
-    token.filter(|s|!s.contains(['\r','\n'])).ok_or_else(||UpdateError::usage("the engine health gate needs bearer auth; set PSEUDOLIFE_MCP_TOKEN in the host env file and retry; nothing was changed"))
+    token
+        .filter(|s| !s.contains(['\r', '\n']))
+        .ok_or_else(|| UpdateError::usage(NO_BEARER))
 }
+/// The refusal of a Rust activation on a host whose env file has no bearer.
+pub(super) const NO_BEARER: &str = "the engine health gate needs bearer auth; set PSEUDOLIFE_MCP_TOKEN in the host env file and retry; nothing was changed";
 pub(super) fn verify_identity(
     u: &Update,
     config: &Value,

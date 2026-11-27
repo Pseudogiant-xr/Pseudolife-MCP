@@ -677,13 +677,14 @@ the package in the interpreter that holds it (pip, or pipx) and restarts
 nothing: it says what to restart (a lite bank moves to Docker instead; see
 below).
 
-A Docker host that never chose a daemon engine moves to the Rust daemon on
-an update to a release that publishes its image, after the update has
-checked the configuration, downloaded the models and backed the bank up;
-if anything refuses before the backup the update continues on Python and
-says why. The scheduled `--unattended` update never changes the engine,
-`--engine python` keeps the Python daemon for good, and an update started
-from a release older than 0.23.0 moves the host on the next attended run
+A Docker host still on the retired Python daemon moves to the Rust daemon
+on its next attended update, after the update has checked the
+configuration, downloaded the models and backed the bank up; if anything
+refuses before the backup the update stops, says why, and leaves the
+Python daemon running as it was. The scheduled `--unattended` update holds
+on such a host until one attended `pseudolife-mcp update` makes the move,
+and an update started from a release older than 0.23.0 moves the host on
+the next attended run
 ([Daemon engine](docs/guide/install-and-move.md)).
 
 Docker update, backup and restore require at least **8 GiB free** on the
