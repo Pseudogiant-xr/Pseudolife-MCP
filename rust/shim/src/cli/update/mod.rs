@@ -3,6 +3,7 @@ mod backup;
 pub(super) mod clients;
 pub(crate) mod disk;
 pub(crate) mod engine;
+mod full_handoff;
 mod options;
 mod ownership;
 pub(crate) mod release;
@@ -327,6 +328,15 @@ pub(crate) struct Update {
     /// An unattended run the guard turned daemon-only: its refusal, which
     /// keeps the client steps out even if a later step reached them.
     pub tunnel_refused: Option<String>,
+    /// The report of the target release's updater after a full hand-off,
+    /// kept as it came (a newer release's fields included) with this run's
+    /// steps first: what `--json` prints.
+    pub handed: Option<Value>,
+    /// This run's steps when the child's report was adopted: later ones (a
+    /// result file that could not be written) are added to `handed`.
+    pub handed_steps: usize,
+    /// What release discovery answered this run, asked once.
+    discovered: Option<std::result::Result<Option<String>, (String, u8)>>,
     #[cfg(test)]
     release_lookup: Option<ReleaseLookup>,
     #[cfg(test)]
@@ -496,6 +506,15 @@ impl UpdateLock {
     pub(crate) fn borrowed(&self) -> bool {
         self.held.is_none()
     }
+    /// Lets children started from now on keep the lock's open file (Unix), so
+    /// the lock outlives this process while a full hand-off child runs. Best
+    /// effort: this process still holds the lock if it fails.
+    pub(crate) fn inherit_by_children(&self) {
+        #[cfg(unix)]
+        if let Some(file) = self.held.as_ref().and_then(|(lock, _)| lock.file()) {
+            let _ = rustix::io::fcntl_setfd(file, rustix::io::FdFlags::empty());
+        }
+    }
 }
 impl Drop for UpdateLock {
     fn drop(&mut self) {
@@ -536,6 +555,9 @@ impl Update {
             tunnel_probe: tunnel_guard::probe,
             tunnel_checked: false,
             tunnel_refused: None,
+            handed: None,
+            handed_steps: 0,
+            discovered: None,
             #[cfg(test)]
             release_lookup: None,
             #[cfg(test)]
@@ -703,12 +725,30 @@ impl Update {
         }
         .into())
     }
-    pub fn target_version(&self) -> Result<Option<String>> {
-        #[cfg(test)]
-        if let Some(discover) = &self.release_lookup {
-            return self.target_version_with(discover);
+    pub fn target_version(&mut self) -> Result<Option<String>> {
+        if self.o.tag.is_none()
+            && let Some(found) = &self.discovered
+        {
+            return found.clone().map_err(|(message, exit_code)| UpdateError {
+                message,
+                exit_code,
+                attended_required: false,
+            });
         }
-        self.target_version_with(latest_release)
+        #[cfg(test)]
+        let found = match &self.release_lookup {
+            Some(discover) => self.target_version_with(discover),
+            None => self.target_version_with(latest_release),
+        };
+        #[cfg(not(test))]
+        let found = self.target_version_with(latest_release);
+        if self.o.tag.is_none() {
+            self.discovered = Some(match &found {
+                Ok(version) => Ok(version.clone()),
+                Err(error) => Err((error.message.clone(), error.exit_code)),
+            });
+        }
+        found
     }
     fn target_version_with(
         &self,
@@ -798,6 +838,11 @@ impl Update {
         }
         if let Some(time) = self.o.schedule.clone() {
             return unattended::schedule(self, &time);
+        }
+        // A newer release's own updater runs the whole update, daemon step
+        // included; it reports what it did, so nothing follows here.
+        if self.full_handoff() {
+            return Ok(());
         }
         if self.o.unattended {
             self.report.mode = "unattended".into();
@@ -892,16 +937,21 @@ impl Update {
         if let Some(payload) = panic {
             std::panic::resume_unwind(payload);
         }
-        if self.o.as_json
-            && output(
-                &format!(
-                    "{}\n",
-                    serde_json::to_string_pretty(&self.report).expect("report")
-                ),
-                false,
-            )
-            .is_err()
-        {
+        let printed = match &mut self.handed {
+            Some(handed) => {
+                if let Some(steps) = handed["steps"].as_array_mut() {
+                    steps.extend(
+                        self.report.steps[self.handed_steps.min(self.report.steps.len())..]
+                            .iter()
+                            .cloned()
+                            .map(Value::from),
+                    );
+                }
+                serde_json::to_string_pretty(handed)
+            }
+            None => serde_json::to_string_pretty(&self.report),
+        };
+        if self.o.as_json && output(&format!("{}\n", printed.expect("report")), false).is_err() {
             return 120;
         }
         self.report.exit_code
@@ -980,7 +1030,9 @@ impl Update {
         let own = env!("CARGO_PKG_VERSION");
         // A handed-off run never hands off again; a checkout deploy already
         // runs the checkout's own code.
-        let handed = self.o.handoff.from.is_some();
+        // A full hand-off child (`full_handoff`) runs the whole update, its
+        // own shim step included; a client hand-off child is --clients-only.
+        let handed = self.o.handoff.from.is_some() && self.o.clients_only;
         if handed {
             self.step(format!(
                 "continuing the client side with {own}'s own code (shim check, plugin cache, Codex hooks)..."
@@ -1374,9 +1426,14 @@ pub(crate) fn run(arguments: Vec<OsString>) -> u8 {
     if arguments.iter().any(|s| s == "--help" || s == "-h") {
         return if output("usage: pseudolife-mcp update [--checkout REPO] [--tag VERSION] [--engine python|rust] [--shadow]\n       [--all | --daemon-only | --clients-only] [--check] [--reinstall] [--allow-downgrade]\n       [--no-backup] [--rollback-tag SUFFIX] [--force-rollback-tag] [--allow-dirty]\n       [--keep-rollbacks N] [--keep-cache-hours N] [--no-cache-prune] [--no-test-login]\n       [--env-file PATH] [--allow-auth-change] [--daemon-url URL] [--health-retries N] [--health-delay-ms N]\n       [--unattended | --schedule HH:MM | --unschedule] [--allow-no-bearer] [--result-file PATH] [--json]\n       [--python-runtime INTERPRETER] (explicit legacy/lite updater)\n",false).is_ok(){0}else{120};
     }
+    let argv = arguments
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
     match Options::parse(arguments) {
         Ok(mut o) => {
             o.handoff = handoff;
+            o.argv = argv;
             Update::new(o).run()
         }
         Err(e) => {

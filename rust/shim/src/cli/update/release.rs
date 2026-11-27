@@ -960,6 +960,11 @@ impl Update {
         self.inspect_active_import(true)
     }
 
+    /// [`Self::active_import`] without retiring a finished import's pointer.
+    pub(super) fn inspect_import(&self) -> Result<Option<ImportRecovery>> {
+        self.inspect_active_import(false)
+    }
+
     fn inspect_active_import(&self, retire: bool) -> Result<Option<ImportRecovery>> {
         let labels = engine::host_labels(self, DAEMON_CONTAINER);
         let on_bridge = labels[engine::ENGINE_LABEL] == "python"
@@ -1084,7 +1089,9 @@ impl Update {
         let _lock = if locked {
             None
         } else {
-            Some(UpdateLock::acquire()?)
+            Some(UpdateLock::acquire_borrowing(
+                self.o.handoff.from.as_deref(),
+            )?)
         };
         let Some(recovery) = self.active_import()? else {
             return Ok(());
