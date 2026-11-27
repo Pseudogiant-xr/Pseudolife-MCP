@@ -143,9 +143,12 @@ def test_tokenless_corpus_declares_only_the_port_rule():
     assert mcp_ci.TOKENLESS_MUTANTS == ("mcp-bare-host", "mcp-any-origin", "mcp-era-skips-security")
     assert mcp_ci.TOKENLESS_DECLARED == {f"rebinding_edges[{i}]" for i in (10, 11, 12, 13)}
     mcp_ci.check_tokenless(tokenless_report())
-    for change in ("diff", "missing", "short", "unserved"):
+    for change in ("diff", "missing", "swapped", "short", "unserved"):
         report = tokenless_report()
-        if change == "diff":
+        if change == "swapped":
+            # The count matches; one declared name is replaced by another.
+            report["diffs"][0] = "rebinding[0]: python=1\n          rust  =2"
+        elif change == "diff":
             report["diffs"].append("rebinding[0]: python=1\n          rust  =2")
             report["summary"]["diffs"] += 1
         elif change == "missing":
