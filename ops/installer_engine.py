@@ -185,19 +185,66 @@ def write_overlay(service: dict) -> Path:
     return path
 
 
-def documents_folder() -> None:
+def owner_of(path: Path) -> int:
+    """The uid owning ``path`` (a seam: no test can make root own a folder)."""
+    return path.stat().st_uid
+
+
+def documents_owner(folder: Path, image: str) -> None:
+    """Give a documents folder root owns back to this user, as Docker leaves
+    a bind source it had to create (an updater older than this folder does
+    that), with a one-off container of the daemon image already on this host:
+    never pulled, no network, a read-only root, uid 0 holding only CHOWN,
+    mounting only that folder and changing only its owner. Only the re-read
+    owner proves it; the folder then gets its 0755 from this process. A
+    folder another non-root account owns may be meant that way, and Docker
+    may be unable: both are named with the sudo line instead."""
+    import os
+    import uuid
+    if os.name == "nt" or folder.is_symlink() or not folder.is_dir():
+        return
+    owner, uid, gid = owner_of(folder), os.geteuid(), os.getegid()
+    if owner == uid:
+        return
+    if owner == 0 and image:
+        name = f"pseudolife-documents-owner-{uuid.uuid4().hex}"
+        try:
+            ran = docker("run", "--rm", "--pull", "never", "--name", name, "--network", "none", "--read-only",
+                         "--user", "0:0", "--cap-drop", "ALL", "--cap-add", "CHOWN",
+                         "--security-opt", "no-new-privileges", "--entrypoint", "chown",
+                         "--mount", mount_spec([("type", "bind"), ("source", str(folder)), ("dst", "/documents")]),
+                         image, f"{uid}:{gid}", "/documents", timeout=120).returncode
+            if ran != 0:
+                docker("rm", "-f", name)
+        except Refusal:
+            ran = 1
+        if ran == 0 and owner_of(folder) == uid:
+            folder.chmod(0o755)
+            print(f"{folder} belonged to root (Docker created it), so you could not copy documents into it; "
+                  "it is yours again.", file=sys.stderr)
+            return
+    print(f"WARNING: {folder} belongs to another account (uid {owner}), so you cannot copy documents into it; "
+          f"run sudo chown {uid}:{gid} {folder} once.", file=sys.stderr)
+
+
+def mount_spec(fields: list) -> str:
+    """A ``docker run --mount`` value: Docker parses it as CSV."""
+    out = []
+    for key, value in fields:
+        field = f"{key}={value}"
+        out.append('"' + field.replace('"', '""') + '"' if any(c in field for c in ',"\n\r') else field)
+    return ",".join(out)
+
+
+def documents_folder(image: str = "") -> None:
     """Create the documents folder the overlay mounts, once: ``0755`` so the
     container's daemon account can read it, inside an owner-only parent when
-    this creates that too; an existing folder is left as it is."""
+    this creates that too; an existing folder is left as it is, except that
+    one root owns is given back to the user (``documents_owner``)."""
     import os
     folder = Path.home() / ".pseudolife-mcp" / "documents"
     if folder.is_dir():
-        # Docker creates a missing bind source as root (an older updater
-        # leaves it so): say how to take it back.
-        if os.name != "nt" and folder.stat().st_uid != os.geteuid():
-            print(f"WARNING: {folder} belongs to another account (uid {folder.stat().st_uid}), so you "
-                  f"cannot copy documents into it; run sudo chown {os.geteuid()} {folder} once.",
-                  file=sys.stderr)
+        documents_owner(folder, image)
         return
     if folder.exists():
         raise Refusal(f"{folder} exists but is not a folder; move it aside and rerun. Nothing was started.")
@@ -301,7 +348,7 @@ def prepare(repo: Path, engine: str, default: bool = False) -> list[Path]:
     found = labels()
     kept = accepted_release() if found is None else accepted(found)
     if kept is not None:
-        documents_folder()
+        documents_folder(kept["image"])
         return [write_overlay({"image": kept["image"], "labels": kept["labels"]})]
     try:
         version = checkout_version(repo)
@@ -317,7 +364,7 @@ def prepare(repo: Path, engine: str, default: bool = False) -> list[Path]:
         print(f"{cause}. The default Rust daemon is unavailable, so this install uses the Python daemon.",
               file=sys.stderr)
         return []
-    documents_folder()
+    documents_folder(image)
     return [write_overlay({"image": image, "labels": {eng.ENGINE_LABEL: "rust", eng.ACTIVATION_LABEL: secrets.token_hex(16),
                                                       eng.RELEASE_LABEL: version}})]
 

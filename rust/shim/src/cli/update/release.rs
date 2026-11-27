@@ -1171,6 +1171,9 @@ impl Update {
         if self.o.clients_only {
             self.refuse_checkout_shadow(&target)?;
             self.refuse_tunnel_move(None)?;
+            // The client steps of a first upgrade by an updater older than the
+            // documents folder run here, after that updater's daemon step.
+            self.documents_owner_of_running();
             self.clients(None, &format!("pseudolife-mcp=={target}"), before.as_ref());
             return Ok(());
         }
@@ -2667,7 +2670,7 @@ impl Update {
         // the first thing that mounts it (this check mounts every bind;
         // Compose would otherwise create a missing one owned by root). Every
         // Rust path checks first: the ordinary update and both import stages.
-        self.documents_folder(config)?;
+        self.documents_folder(config, image)?;
         self.step(format!(
             "checking this bank's configuration against {image}..."
         ));

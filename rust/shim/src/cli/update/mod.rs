@@ -344,6 +344,9 @@ pub(crate) struct Update {
     health_probe: Option<fn() -> Option<Value>>,
     #[cfg(test)]
     command_probe: Option<CommandProbe>,
+    /// The documents folder's owner, in place of the filesystem's.
+    #[cfg(test)]
+    owner_probe: Option<fn(&Path) -> Option<u32>>,
 }
 
 /// The checkout as the deploy later names it to the shim step.
@@ -565,6 +568,8 @@ impl Update {
             health_probe: None,
             #[cfg(test)]
             command_probe: None,
+            #[cfg(test)]
+            owner_probe: None,
         }
     }
     /// Refuses, before anything is changed, a run whose client steps would

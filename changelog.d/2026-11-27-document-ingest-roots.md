@@ -15,7 +15,11 @@
   `/documents`. The installers and `pseudolife-mcp update` create it when it
   is missing (`0755` inside an owner-only `~/.pseudolife-mcp` on Linux and
   macOS) and change nothing when it exists. Copy a file there and ingest it
-  as `/documents/<name>`.
+  as `/documents/<name>`. A folder Docker created as root (an upgrade run by
+  an older client) is given back to you automatically, in that upgrade's
+  client steps or the next install or update, with a one-off container of
+  the daemon image already on the host; where Docker cannot, the `sudo
+  chown` that fixes it is named.
 - Upgrading: an agent that ingested files from other paths is refused until
   the file is copied into the documents folder or its directory is added to
   `memory.reference.ingest_roots` (with Docker, also mounted into the

@@ -1283,7 +1283,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
             if choice == "rust" {
                 // The config the replacement runs with: its model directory and volume.
                 let replacement = compose_config(u, &compose, &env, UNRESOLVED)?;
-                u.documents_folder(&replacement)?;
+                u.documents_folder(&replacement, &image)?;
                 u.provision_models(&image, &replacement)?;
             }
             // A state volume the daemon account cannot use is archived first

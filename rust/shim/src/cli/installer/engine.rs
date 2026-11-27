@@ -535,7 +535,7 @@ fn prepare(repo: &Path, engine: &str, default: bool) -> Result<Vec<PathBuf>> {
     if let Some(kept) = kept {
         let image = kept["image"].as_str().unwrap_or_default().to_owned();
         let labels = kept["labels"].as_object().cloned().unwrap_or_default();
-        documents_folder()?;
+        documents_folder(&image)?;
         return written(write_overlay(&image, &labels));
     }
     let attempt = (|| -> Result<(String, String)> {
@@ -563,23 +563,43 @@ fn prepare(repo: &Path, engine: &str, default: bool) -> Result<Vec<PathBuf>> {
     labels.insert(ENGINE_LABEL.into(), json!("rust"));
     labels.insert(ACTIVATION_LABEL.into(), json!(activation()));
     labels.insert(RELEASE_LABEL.into(), json!(version));
-    documents_folder()?;
+    documents_folder(&image)?;
     written(write_overlay(&image, &labels))
 }
 
 /// The documents folder the overlay mounts, created once
-/// (`update::documents`); an existing one is left as it is.
-fn documents_folder() -> Result<()> {
-    documents_folder_in(&crate::cli::update::documents::compose_home())
+/// (`update::documents`); an existing one is left as it is, except that one
+/// root owns is given back to the user with `image`, already on this host.
+fn documents_folder(image: &str) -> Result<()> {
+    use crate::cli::update::documents;
+    let mut run = |args: &[String]| {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        match docker(&args, true, 120) {
+            Ok(ran) => (ran.code, ran.stdout),
+            Err(_) => (1, String::new()),
+        }
+    };
+    documents_folder_in(&documents::compose_home(), &mut |folder| {
+        documents::fix_owner(folder, Some(image), &mut run)
+    })
 }
 
-fn documents_folder_in(home: &Path) -> Result<()> {
-    use crate::cli::update::documents;
+fn documents_folder_in(
+    home: &Path,
+    fix_owner: &mut dyn FnMut(&Path) -> crate::cli::update::documents::OwnerFix,
+) -> Result<()> {
+    use crate::cli::update::documents::{self, OwnerFix};
     let folder = documents::default_folder(home);
     match documents::ensure(&folder) {
         Ok(documents::Outcome::Unchanged) => {
-            if let Some(note) = documents::owner_note(&folder) {
-                let _ = writeln!(io::stderr().lock(), "WARNING: {note}.");
+            match fix_owner(&folder) {
+                OwnerFix::Correct => {}
+                OwnerFix::Repaired(line) => {
+                    let _ = writeln!(io::stderr().lock(), "{line}.");
+                }
+                OwnerFix::Manual(line) => {
+                    let _ = writeln!(io::stderr().lock(), "WARNING: {line}.");
+                }
             }
             Ok(())
         }
@@ -1294,6 +1314,7 @@ mod tests {
 
     #[test]
     fn the_install_creates_the_documents_folder_once() {
+        use crate::cli::update::documents::OwnerFix;
         let home = std::env::temp_dir().join(format!(
             "pl-installer-documents-{}-{}",
             std::process::id(),
@@ -1301,14 +1322,22 @@ mod tests {
         ));
         fs::create_dir_all(&home).unwrap();
         let folder = home.join(".pseudolife-mcp").join("documents");
-        documents_folder_in(&home).unwrap();
+        let mut checked = vec![];
+        let mut fix = |f: &Path| {
+            checked.push(f.to_owned());
+            OwnerFix::Correct
+        };
+        documents_folder_in(&home, &mut fix).unwrap();
         assert!(folder.is_dir());
         fs::write(folder.join("kept.md"), b"kept").unwrap();
-        documents_folder_in(&home).unwrap();
+        documents_folder_in(&home, &mut fix).unwrap();
         assert_eq!(fs::read(folder.join("kept.md")).unwrap(), b"kept");
+        // Only the existing folder's owner is checked: a folder this run
+        // created is the user's.
+        assert_eq!(checked, std::slice::from_ref(&folder));
         fs::remove_dir_all(&folder).unwrap();
         fs::write(&folder, b"not a folder").unwrap();
-        let refused = documents_folder_in(&home).unwrap_err();
+        let refused = documents_folder_in(&home, &mut |_| OwnerFix::Correct).unwrap_err();
         assert!(
             refused.message.contains("not a folder"),
             "{}",

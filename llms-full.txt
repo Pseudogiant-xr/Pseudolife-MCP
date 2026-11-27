@@ -9618,8 +9618,12 @@ nothing when it is there.
   `pseudolife-mcp update` before anything changes: move that mount to
   another container path and add the path to `memory.reference.ingest_roots`.
 - If Docker created the folder before the native update could (an update
-  run by an older client), it belongs to root; install and update then name
-  the `sudo chown` that gives it back to you.
+  run by an older client), it belongs to root. The client steps of that same
+  update, and every later install or update, give it back to you with a
+  one-off container of the daemon image already on the host (only that
+  folder mounted, only its owner changed) and say so in one line; where
+  Docker cannot, or another non-root account owns the folder, they name the
+  `sudo chown` that gives it back instead.
 
 ## The test suite's Postgres login: `pseudolife-mcp test-login`
 
