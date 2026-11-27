@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "scope",
+  "before": "cd3a6fa994792606",
+  "fingerprint": "dfe19582e4ce5f70",
+  "reason": "The Classify step also runs ops/ci_release_cut.py on an ordinary pull request (two git ls-tree reads of the merge commit and its base, well under a second), and adds the output cut. No step is added and a batch, push or merge group runs exactly as before, so the measured 0.2 minutes hold."
+}

@@ -49,9 +49,10 @@ its publication job failed.
 
 `RELEASE-READY.json` is separate from the checksum manifest. It contains
 the release `version`, the full tagged `commit` SHA, and an `images` object
-mapping `pseudolife-daemon`, `pseudolife-pg` and `pseudolife-daemon-rust`
-to their published `sha256:` digests. The JSON contains no timestamp or run
-attempt.
+mapping `pseudolife-pg` and `pseudolife-daemon-rust` to their published
+`sha256:` digests. Releases before 0.26.0 also map `pseudolife-daemon`, the
+retired Python daemon image, which 0.26.0 and later no longer publish. The
+JSON contains no timestamp or run attempt.
 These fields give operators a stable record of what the workflow approved
 and published. Discovery uses the marker's asset metadata from GitHub.
 
@@ -209,15 +210,18 @@ Release-mode `pseudolife-mcp update --engine rust` (both the Python and the
 native updater) pulls `pseudolife-daemon-rust:<target>` with
 `docker-compose.rust-ghcr.yml` applied after `docker-compose.ghcr.yml`. When
 the target release has no such image, the pull fails before any backup or
-rollback tag and the host is unchanged. A host that never chose an engine
-(Python, with no accepted selection recorded) moves to Rust on an attended
-update without `--engine` when the target release publishes the image
-(`docker manifest inspect`), and stays on Python with one line otherwise or
-when the move refuses before its backup (no bearer, a pending counters
-import, a newer bank schema); unattended runs and `--no-backup` never move,
-and `--engine python` records the choice to stay. On a Rust host an update without `--engine` keeps Rust, so a release published without its Rust image stops
-that host's updates at the pull (nothing changed) until the image exists;
-`--engine python` switches back on the same bank. The overlay keeps the
+rollback tag and the host is unchanged. The Python daemon is retired
+(maintainer, 27 November 2026), so the native updater moves every Python
+host to Rust on an attended update, whatever choice it recorded. A release
+that publishes no Rust image (`docker manifest inspect`) is refused, and a
+move that refuses before its backup (no bearer, a pending counters import,
+a newer bank schema, a configuration the Rust image refuses) stops with its
+refusal and leaves the Python daemon running untouched. On a Python host
+an unattended run holds for an attended one, `--no-backup` is refused, and
+only the bearer handover (`--allow-auth-change`) runs on Python. Release
+mode refuses `--engine python`; checkout mode still builds either engine.
+On a Rust host an update without `--engine` keeps Rust, so a release published without its Rust image stops
+that host's updates at the pull (nothing changed) until the image exists. The overlay keeps the
 pinned models in the project volume `pseudolife_rust_models` at `/models`,
 outside the `/data` volume that every backup archives; the updater
 provisions them there before its backup.
@@ -247,7 +251,7 @@ Use "Re-run failed jobs" to reuse successful build outputs. Never use
 attachment refuses the new `SHA256SUMS` and PyPI cannot follow until the
 attached assets are deleted. If a rerun
 cannot clear a marker failure, the tagged commit's script still runs on
-each attempt. The maintainer chooses between checking the three published
+each attempt. The maintainer chooses between checking the two published
 images and attaching a hand-built `RELEASE-READY.json` with
 `gh release upload`, or cutting a patch release. If approval is declined,
 the marker stays absent and native GitHub discovery withholds the release.

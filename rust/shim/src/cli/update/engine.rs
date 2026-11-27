@@ -9,14 +9,15 @@ pub(crate) const RELEASE_LABEL: &str = "org.pseudolife.release";
 pub(crate) fn release_accepted() -> PathBuf {
     data_dir().join("update-engine/docker-compose.release-accepted.json")
 }
-/// An explicit engine choice that left no activation (installer
-/// `--engine python`, or `update --engine python` with nothing to deploy),
-/// shared with the Python updater's `update-engine/engine-choice.json`.
+/// An explicit engine choice that left no activation (an earlier installer
+/// `--engine python`), shared with the Python updater's
+/// `update-engine/engine-choice.json`. A release update reads it only to say
+/// that it no longer applies: the Python daemon is retired.
 pub(super) fn choice_path() -> PathBuf {
     data_dir().join("update-engine/engine-choice.json")
 }
 /// `Ok(None)` only for a missing file; `Err(reason)` for one that cannot be
-/// read or holds no engine, which still keeps the host's choice.
+/// read or holds no engine.
 pub(super) fn recorded_choice() -> std::result::Result<Option<String>, String> {
     let bytes = match fs::read(choice_path()) {
         Ok(bytes) => bytes,
@@ -133,7 +134,15 @@ pub(super) fn selected_checkout(u: &mut Update) -> Result<Option<PathBuf>> {
     }
     let labels = host_labels(u, &container);
     let current = labels[ENGINE_LABEL].as_str().unwrap_or("python");
-    if current == "rust" || truthy(&labels[ACTIVATION_LABEL]) {
+    // A Rust daemon a stack manager deployed from ops/docker-compose.stack.yml
+    // carries the engine label alone: update and the installers always add an
+    // activation, so it cannot be an unfinished activation of theirs. A
+    // release update adopts it and records its activation.
+    let stack_deployed = current == "rust"
+        && !truthy(&labels[ACTIVATION_LABEL])
+        && labels[RELEASE_LABEL].is_null()
+        && labels[CHECKOUT_LABEL].is_null();
+    if (current == "rust" || truthy(&labels[ACTIVATION_LABEL])) && !stack_deployed {
         validated(&labels)?;
     }
     if let Some(selected) = selected
@@ -156,7 +165,7 @@ pub(super) fn selected_checkout(u: &mut Update) -> Result<Option<PathBuf>> {
     if let Some(repo) = repo {
         return Ok(Some(repo));
     }
-    if labels[RELEASE_LABEL].as_str().is_some() {
+    if labels[RELEASE_LABEL].as_str().is_some() || stack_deployed {
         return Ok(None);
     }
     if u.o.tag.is_some() || u.o.reinstall || u.o.allow_downgrade || u.o.env_file.is_some() {
@@ -254,8 +263,12 @@ pub(super) fn daemon_token(config: &Value) -> Result<String> {
                 })
             })
         });
-    token.filter(|s|!s.contains(['\r','\n'])).ok_or_else(||UpdateError::usage("the engine health gate needs bearer auth; set PSEUDOLIFE_MCP_TOKEN in the host env file and retry; nothing was changed"))
+    token
+        .filter(|s| !s.contains(['\r', '\n']))
+        .ok_or_else(|| UpdateError::usage(NO_BEARER))
 }
+/// The refusal of a Rust activation on a host whose env file has no bearer.
+pub(super) const NO_BEARER: &str = "the engine health gate needs bearer auth; set PSEUDOLIFE_MCP_TOKEN in the host env file and retry; nothing was changed";
 pub(super) fn verify_identity(
     u: &Update,
     config: &Value,

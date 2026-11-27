@@ -64,8 +64,8 @@ decision of 23 November 2026): no arm64 daemon image is published. A client
 on arm64 against a daemon on a supported host is not ruled out. The arm64 job
 runs only the two stock rows, as witnesses, in about seven minutes. Their homes have no Codex folder, so the
 clean install row witnesses issue #1897. The clean install runs the tagged
-installer's default Docker install, which can fall back to a checkout-built
-Python daemon. The upgrade runs the real release updater from a stock
+installer's default Docker install (before 0.26.0 it could fall back to a
+checkout-built Python daemon; from 0.26.0 the installers never install it). The upgrade runs the real release updater from a stock
 v0.24.0 install and records the missing arm64 image manifest. The three
 client rows count as "cannot run", with that decision as their reason. [Issue
 #1872](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1872)

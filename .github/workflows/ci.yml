@@ -38,8 +38,9 @@
 # The Python freeze also split tests/ (tests/suite_classes.txt): a run
 # collects only the live files unless pytest gets --include-frozen, which
 # `test` passes (scope's include_frozen, through ops/ci_tests.sh) for a
-# change to the frozen package (a freeze exception), an unreadable diff and
-# the weekly nightly (Sunday UTC). The Windows and macOS lanes name live
+# change to the frozen package (a freeze exception, a release cut's batch),
+# a release cut's own pull request, an unreadable diff and the weekly
+# nightly (Sunday UTC). The Windows and macOS lanes name live
 # files only, so the switch would add nothing there. The lite tier is dropped, and with it test-lite-linux (the
 # whole suite on embedded PostgreSQL); the Windows and macOS lanes keep their
 # names and run the live files of their selections.
@@ -52,7 +53,9 @@
 # pyproject.toml, a lock file, the Rust toolchain pin): only batches spend
 # the heavy lanes (maintainer decision), and the batch runs the edited
 # workflow on a head containing the edit before it reaches master. The
-# `test` job is skipped there, which reports success to its required check.
+# `test` job is skipped there, which reports success to its required check,
+# except on a release cut's pull request, where it runs frozen-inclusive
+# (scope's cut, ops/ci_release_cut.py).
 # A newer push to an ordinary PR cancels its older run; nothing else is
 # ever cancelled (see `concurrency`). The nightly and manual runs are
 # unchanged.
@@ -135,6 +138,9 @@ jobs:
       # not PYTEST_ADDOPTS, which every pytest a test starts would inherit
       # (tests/test_suite_classes.py's own child runs, for one).
       include_frozen: ${{ steps.scope.outputs.include_frozen }}
+      # true for an ordinary pull request that is a release cut: `test`
+      # alone runs on it, with the frozen files (the Classify step).
+      cut: ${{ steps.scope.outputs.cut }}
       batch_passed: ${{ steps.batch.outputs.passed }}
       push_passed: ${{ steps.push.outputs.passed }}
     steps:
@@ -228,7 +234,15 @@ jobs:
           if [ "$EVENT_NAME" = pull_request ] && [ -n "$HEAD_REF" ] \
              && [[ "$HEAD_REF" != integrate/* ]]; then
             echo "not an integrate/ batch branch: fast lanes only"
-            echo "python=false" >> "$GITHUB_OUTPUT"; exit 0
+            echo "python=false" >> "$GITHUB_OUTPUT"
+            # Except `test` for a release cut: it runs the frozen-inclusive
+            # suite on the cut's own head (cut=true, include_frozen=true),
+            # so the cut learns its time and failures before its batch
+            # (ops/ci_release_cut.py says why). A crash there leaves
+            # the fast lanes alone; the batch still runs the suite.
+            python3 -m ops.ci_release_cut --base HEAD^1 --head HEAD --github-output "$GITHUB_OUTPUT" \
+              || echo "the release-cut check failed: fast lanes only"
+            exit 0
           fi
           # A change to the frozen package runs the package's own tests too.
           frozen=$(grep -E '^pseudolife_memory/' <<<"$files" || true)
@@ -361,7 +375,7 @@ jobs:
           tests/test_pdfium_pin.py tests/test_prune_worktrees.py
           tests/test_runner_cleanup.py tests/test_rust_mcp_catalogue.py tests/test_rust_release_image.py tests/test_schema_version_guard.py
           tests/test_update_engine.py tests/test_installer_engine.py tests/test_suite_classes.py
-          tests/test_ci_budget_integration.py tests/test_ci_push_passed.py tests/test_ci_batch_passed.py
+          tests/test_ci_budget_integration.py tests/test_ci_push_passed.py tests/test_ci_batch_passed.py tests/test_ci_release_cut.py
           tests/test_claude_md_citations.py tests/test_ci_native_client.py tests/test_codex_hook_native_golden.py tests/test_update_bridge.py tests/test_installer_legacy_hooks_native.py tests/test_client_install_ux_native.py
           tests/test_scheduled_task_lock.py tests/test_fixture_guards_package_absent.py
           tests/test_suite_lock.py tests/test_ci_windows_lanes.py
@@ -400,8 +414,9 @@ jobs:
   test:
     needs: scope
     # Fail-safe: run unless scope affirmatively says skip, so a failed or
-    # empty scope runs the suite instead of skipping it.
-    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test') }}
+    # empty scope runs the suite instead of skipping it. A release cut's own
+    # pull request runs it too (scope's cut), frozen-inclusive.
+    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && (needs.scope.outputs.python != 'false' || needs.scope.outputs.cut == 'true') && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test') }}
     runs-on: ubuntu-latest
     # ops/ci_tests.sh bounds pytest at 50 min, or 72 with the frozen files
     # (its comment names the 2026-11-24/26 measurements, the slowest on an
@@ -613,7 +628,11 @@ jobs:
     # The time to finish that head is still unknown. Allow 10 minutes
     # beyond the old cutoff for the run, including pytest's 600s
     # faulthandler dump if a test hangs late.
-    timeout-minutes: 40
+    # 2026-11-26 (every attempt of ci.yml runs created 2026-11-12..26): the
+    # slowest successful run took 36.4 min (0.26.0 cut
+    # batch run 45747873168, job 139668302769), 91% of 40, and 30 attempts
+    # took 32 or more; 51 is about 40% over the slowest.
+    timeout-minutes: 51
 
     steps:
       - uses: actions/checkout@v4

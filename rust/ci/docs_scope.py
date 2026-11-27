@@ -104,6 +104,24 @@ def documentation_only(paths: Iterable[str], *, allow_generated_census: bool = F
     return docs
 
 
+def pull_request_docs(paths: list[str], regular: bool) -> bool:
+    """The documentation shortcut's path rule for a pull request's net diff."""
+    docs = [path for path in paths if path != CENSUS]
+    return regular and bool(docs) and all(map(is_documentation_path, docs))
+
+
+def pull_request_skips_rust(paths: list[str], regular: bool, *, docs_lane: bool = True) -> bool:
+    """Whether scope skips the Rust lanes of a pull request whose merge
+    changes `paths` against its base tip (`regular`: every mode is a regular
+    file). `docs_lane` says the documentation lane's test selection is
+    available; without it only the narrower `documentation_only` rule skips.
+    `rust_scope` decides with this, and `ops/integrate.py build` runs the
+    frozen base's copy, so admission never waits for a replay CI skipped."""
+    if docs_lane and pull_request_docs(paths, regular):
+        return True
+    return bool(paths) and regular and documentation_only(paths, allow_generated_census=True)
+
+
 def git(*args: str) -> str:
     return subprocess.check_output(["git", *args], cwd=ROOT, timeout=45).decode("utf-8")
 
@@ -237,8 +255,7 @@ def docs_selection(env: Mapping[str, str]) -> tuple[str, list[str]]:
             if not env.get("HEAD_REF") or not sha or sha != git("rev-parse", "HEAD").strip():
                 raise ValueError("pull request checkout identity is unavailable")
             paths, regular = changed_paths("HEAD^1")
-            docs = [path for path in paths if path != CENSUS]
-            if not regular or not docs or not all(map(is_documentation_path, docs)):
+            if not pull_request_docs(paths, regular):
                 return "other", []
         else:
             return "other", []
@@ -268,6 +285,7 @@ def rust_scope(env: Mapping[str, str], *, docs: bool | None = None) -> tuple[boo
         if docs is None:
             docs = docs_selection(env)[0] == "docs"
         if docs:
+            # For a pull request, pull_request_skips_rust with its docs lane.
             if event == "push":
                 report_census(env)
                 return True, False
@@ -285,7 +303,11 @@ def rust_scope(env: Mapping[str, str], *, docs: bool | None = None) -> tuple[boo
         if paths:
             head_ref = env.get("HEAD_REF")
             ordinary = event == "pull_request" and head_ref and not head_ref.startswith(BATCH_PREFIX)
-            return not ordinary, not (regular and documentation_only(paths, allow_generated_census=True))
+            # Here the documentation lane was not selected: its rule or its
+            # test selection failed, so only the narrower rule may skip.
+            skips = (pull_request_skips_rust(paths, regular, docs_lane=False) if event == "pull_request"
+                     else regular and documentation_only(paths, allow_generated_census=True))
+            return not ordinary, not skips
     except (OSError, subprocess.SubprocessError, ValueError, KeyError) as error:
         print(f"Rust scope unavailable: {error}", file=sys.stderr)
     return True, True

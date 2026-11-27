@@ -17,6 +17,7 @@ SELECTION_ENV = "PSEUDOLIFE_PORT_ORACLE_SELECTION"
 
 VERSION_FILES = {
     "plugin/release.json", "server.json", "ops/docker-compose.yml",
+    "ops/docker-compose.stack.yml",
     "pseudolife_memory/compose/docker-compose.yml",
     "rust/shim/Cargo.toml", "rust/daemon/Cargo.toml", "rust/Cargo.lock",
     "rust/shim/src/lifecycle.rs", "rust/shim/tests/auth_lifecycle_http.rs",
@@ -87,7 +88,12 @@ def version_metadata_matches(path, before, after, previous, current):
         return old == new and before.replace(previous.encode(), current.encode()) == after
     # Compose's only release field is the daemon image tag. An equal version
     # string in an environment value or address is not release metadata.
-    pattern = rb"(?m)^([ \t]*image:[ \t]+pseudolife-daemon:)" + re.escape(previous.encode()) + rb"([ \t]*\r?$)"
+    if path == "ops/docker-compose.stack.yml":
+        # The stack-manager file's Rust image defaults its tag to the release.
+        pattern = (rb"(?m)^([ \t]*image:[ \t]+ghcr\.io/pseudogiant-xr/pseudolife-daemon-rust:\$\{PSEUDOLIFE_IMAGE_TAG:-)"
+                   + re.escape(previous.encode()) + rb"(\}[ \t]*\r?$)")
+    else:
+        pattern = rb"(?m)^([ \t]*image:[ \t]+pseudolife-daemon:)" + re.escape(previous.encode()) + rb"([ \t]*\r?$)"
     return re.sub(pattern, lambda match: match[1] + current.encode() + match[2], before) == after
 
 

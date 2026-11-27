@@ -10,6 +10,8 @@ tests"); the walkthrough is `docs/dev/merge-batches.md`.
     python ops/integrate.py status            # labelled PRs, CI, mergeability
     python ops/integrate.py build --dry-run   # what a build would do
     python ops/integrate.py build             # merge the batch locally
+    python ops/integrate.py build --expect <PR,PR...>
+                                              # and stop unless exactly those merge
     python ops/integrate.py build --after-drop <closed batch PR>
                                               # again without its dropped culprit,
                                               # no suite ("After a drop")
@@ -282,6 +284,9 @@ class Member:
     checks_why: str = ""   # for `unverified`: the read that failed; for `failing`: the red checks
     report_only_red: tuple[str, ...] = ()   # red REPORT_ONLY_CHECK runs, shown, not counted
     snapshot_required: bool | None = None
+    # Not required only because the head's own Rust run showed its scope
+    # skipped the Rust lanes: `open` reads that run again before publishing.
+    snapshot_ci_skip: bool = False
     snapshot: str = "not required"
     snapshot_why: str = ""
     rust_jobs: str = ""
@@ -459,7 +464,13 @@ SNAPSHOT_STEP = "Replay touched PR goldens"
 SNAPSHOT_SELECTOR = "rust/ci/pr_precheck.py"
 
 # Execute only the frozen base's selector code in an isolated interpreter;
-# the checkout's Python files are inputs read as text, never imported.
+# the checkout's Python files are inputs read as text, never imported. CI's
+# scope verdict comes from the base's own rust/ci/docs_scope.py, copied with
+# what it imports (DOCS_SCOPE_FILES) to a temporary directory; a base
+# without its pull_request_skips_rust skips nothing. It prints whether any
+# path reaches snapshot rows, whether scope skips the Rust lanes whatever
+# its docs lane does, and whether it skips them once the docs lane is
+# selected (which also needs that lane's test selection to succeed).
 _SNAPSHOT_INPUTS = """import json, pathlib, sys, types
 data = json.load(sys.stdin)
 root = pathlib.Path(data['root'])
@@ -471,10 +482,41 @@ selector = types.ModuleType('snapshot_selector')
 selector.__file__ = str(root / 'rust/ci/pr_precheck.py')
 exec(compile(data['selector'], selector.__file__, 'exec'), selector.__dict__)
 files = data['files']
-docs_only = any(scope.is_docs(path) for path in files) and all(
-    scope.is_docs(path) or path == 'rust/producer-census.json' for path in files)
-print(json.dumps(not docs_only and any(selector.rows_for(path, {}) for path in files)))
+always = with_docs_lane = False
+if data['ci_scope']:
+    sys.path.insert(0, data['ci_scope'])
+    from rust.ci import docs_scope
+    verdict = getattr(docs_scope, 'pull_request_skips_rust', None)
+    if verdict is not None:
+        always = verdict(files, data['regular'], docs_lane=False) is True
+        with_docs_lane = verdict(files, data['regular']) is True
+print(json.dumps([any(selector.rows_for(path, {}) for path in files), always, with_docs_lane]))
 """
+SCOPE_JOB = "Scope"
+# A matrix job its `if` skipped is reported unexpanded, under its template.
+UNEXPANDED_RUST_JOB = "Rust / ${{ matrix.os }}"
+REGULAR_MODES = frozenset({"000000", "100644", "100755"})
+
+
+def _net_diff(base: str, tree: str) -> tuple[list[str], bool]:
+    """The paths a merge tree changes against `base`, and whether every old
+    and new mode is a regular file, as CI's `changed_paths` reads them."""
+    raw = _out("diff", "--raw", "-z", "--no-renames", base, tree)
+    if not raw:
+        return [], True
+    if not raw.endswith("\0"):
+        raise ValueError("incomplete raw Git diff")
+    records = raw[:-1].split("\0")
+    if len(records) % 2:
+        raise ValueError("malformed raw Git diff record")
+    paths, regular = [], True
+    for metadata, path in zip(records[::2], records[1::2]):
+        if not metadata.startswith(":") or not path:
+            raise ValueError("malformed raw Git diff record")
+        old_mode, new_mode = metadata[1:].split()[:2]
+        regular = regular and {old_mode, new_mode} <= REGULAR_MODES
+        paths.append(path)
+    return paths, regular
 
 
 def _has_snapshot_selector(base: str) -> bool:
@@ -497,7 +539,8 @@ def _base_has_snapshot_admission(base: str) -> bool:
         for node in tree.body)
 
 
-def _snapshot_requirement(member: Member, base: str) -> tuple[bool | None, str]:
+def _snapshot_requirement(member: Member, base: str,
+                          rollup: list[dict] | None = None) -> tuple[bool | None, str]:
     try:
         if not _has_snapshot_selector(base):
             return False, ""
@@ -515,21 +558,117 @@ def _snapshot_requirement(member: Member, base: str) -> tuple[bool | None, str]:
         tree = merged.stdout.splitlines()[0]
         # CI diffs its synthetic PR merge against the base parent. A
         # three-dot diff would retain runtime edits already landed on base.
-        files = _out("diff", "--name-only", "--no-renames", base, tree).splitlines()
+        files, regular = _net_diff(base, tree)
         payload = {"root": _out("rev-parse", "--show-toplevel"),
                    "selector": _out("show", f"{base}:{SNAPSHOT_SELECTOR}"),
                    "scope": _out("show", f"{base}:{CI_SCOPE_CODE}"),
-                   "files": sorted(files)}
-        result = _run([sys.executable, "-I", "-c", _SNAPSHOT_INPUTS],
-                      input=json.dumps(payload), check=False)
+                   "files": sorted(files), "regular": regular, "ci_scope": None}
+        with tempfile.TemporaryDirectory(prefix="integrate-snapshot-scope-") as tmp:
+            if _out("ls-tree", base, "--", DOCS_SCOPE):
+                for path in DOCS_SCOPE_FILES:
+                    target = Path(tmp) / path
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(_out("show", f"{base}:{path}") + "\n", encoding="utf-8")
+                payload["ci_scope"] = tmp
+            # -S too: an installed package named `rust` or `ops` must not
+            # shadow the base's copies.
+            result = _run([sys.executable, "-I", "-S", "-c", _SNAPSHOT_INPUTS],
+                          input=json.dumps(payload), check=False)
         if result.returncode:
-            return None, "the frozen snapshot input selector failed; retry build after fixing its inputs"
-        required = json.loads(result.stdout)
-        if type(required) is not bool:
-            raise ValueError("snapshot input selector returned no boolean")
-        return required, ""
+            return None, ("the frozen snapshot input selector failed: "
+                          + ((result.stderr or "").strip().splitlines() or ["no output"])[-1]
+                          + "; retry build after fixing its inputs")
+        verdict = json.loads(result.stdout)
+        if (not isinstance(verdict, list) or len(verdict) != 3
+                or not all(type(value) is bool for value in verdict)):
+            raise ValueError("snapshot input selector returned no three booleans")
+        rows, always, with_docs_lane = verdict
+        if not rows or always:
+            return False, ""
+        if not with_docs_lane:
+            return True, ""
     except (Refusal, OSError, ValueError) as exc:
         return None, _unread("snapshot inputs", exc) + "; retry build"
+    # Only the docs lane skips these paths, and CI selects it only when its
+    # test selection succeeds: the head's own run must show the skip.
+    state, why = _scope_skip(member.sha, rollup)
+    member.snapshot_ci_skip = state == "skipped"
+    return {"skipped": (False, ""), "ran": (True, "")}.get(state, (None, why))
+
+
+# `build` reads the scope skip to admit a member and `open` reads it again
+# before publishing, so a retry names whichever of the two reported it.
+_SCOPE_RETRY = "retry build (or open, if open reported this)"
+
+
+def _scope_skip(sha: str, rollup: list[dict] | None) -> tuple[str, str]:
+    """How the head's own pull-request run of the Rust workflow treated its
+    Rust lanes: `skipped` only once that run's latest attempt completed
+    successfully with its Scope job passed and the Rust job skipped
+    unexpanded; `ran` when that attempt expanded a snapshot job (then its
+    replay is the evidence); otherwise `pending`, with why. The rollup's
+    Scope checks only locate the run (the newest one of this head's
+    pull-request event and workflow); the verdict comes from the job list
+    of the run's latest attempt, as ops/ci_batch_passed.py reads one, so a
+    rerun's own jobs decide. Reads Actions metadata, never logs."""
+    wait = ("the Rust workflow has not shown on the PR head whether its scope skips the Rust "
+            "lanes (its pull-request run has not finished); " + _SCOPE_RETRY + " once it has")
+    try:
+        runs: dict[int, dict] = {}
+        for check in rollup or []:
+            if check.get("name") != SCOPE_JOB or "context" in check:
+                continue
+            match = _ACTIONS_JOB.search(check.get("detailsUrl") or "")
+            if not match:
+                continue
+            meta = json.loads(gh("api", f"repos/{{owner}}/{{repo}}/actions/jobs/{match.group(1)}"))
+            run_id = int(meta["run_id"])
+            run = json.loads(gh("api", f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}"))
+            if (meta.get("head_sha") == sha and run.get("head_sha") == sha
+                    and meta.get("name") == SCOPE_JOB and run.get("event") == "pull_request"
+                    and str(run.get("path", "")).split("@", 1)[0] == SNAPSHOT_WORKFLOW):
+                runs[run_id] = run
+        if not runs:
+            return "pending", wait
+        run = max(runs.values(), key=lambda run: (str(run.get("created_at", "")), int(run.get("id") or 0)))
+        run_id, attempt = int(run["id"]), int(run["run_attempt"])
+        jobs = _attempt_jobs(run_id, attempt)
+        if any(job.get("name") in SNAPSHOT_JOBS for job in jobs):
+            return "ran", ""
+        scope = [job for job in jobs if job.get("name") == SCOPE_JOB]
+        if run.get("status") != "completed" or any(job.get("status") != "completed" for job in scope):
+            return "pending", wait
+        if (str(run.get("conclusion")).lower() == "success" and len(scope) == 1
+                and str(scope[0].get("conclusion")).lower() == "success"
+                and any(job.get("name") == UNEXPANDED_RUST_JOB and str(job.get("conclusion")).lower() == "skipped"
+                        for job in jobs)):
+            return "skipped", ""
+        scope_ended = ", ".join(str(job.get("conclusion")).lower() for job in scope) or "absent"
+        return "pending", (f"the Rust workflow's pull-request run {run_id} (attempt {attempt}) on the PR "
+                           f"head ended {str(run.get('conclusion')).lower()} (Scope {scope_ended}) without "
+                           "showing that its scope skipped the Rust lanes; rerun the Rust workflow or "
+                           "push a new commit")
+    except (Refusal, KeyError, TypeError, ValueError) as exc:
+        return "pending", _unread("the Rust workflow's scope job metadata", exc) + "; " + _SCOPE_RETRY
+
+
+def _attempt_jobs(run_id: int, attempt: int) -> list[dict]:
+    """Every job of one attempt of a workflow run, across pages."""
+    jobs: list[dict] = []
+    page = 1
+    while True:
+        listing = json.loads(gh("api", f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/attempts/"
+                                       f"{attempt}/jobs?per_page=100&page={page}"))
+        if not isinstance(listing, dict) or not isinstance(listing.get("jobs"), list) \
+                or not isinstance(listing.get("total_count"), int):
+            raise ValueError(f"the jobs of run {run_id} attempt {attempt} could not be read")
+        jobs.extend(job for job in listing["jobs"] if isinstance(job, dict))
+        if len(jobs) >= listing["total_count"] or not listing["jobs"]:
+            if len(jobs) < listing["total_count"]:
+                raise ValueError(f"the jobs of run {run_id} attempt {attempt} ended at {len(jobs)} "
+                                 f"of {listing['total_count']}")
+            return jobs
+        page += 1
 
 
 def _snapshot_state(sha: str, rollup: list[dict] | None,
@@ -1103,7 +1242,8 @@ def ready(label: str, base_sha: str | None = None, *, exclude: set[int] | None =
                               if name in jobs else f"{name}: absent"
                               for name in ("Rust / ubuntu-latest", "Rust / windows-latest"))
         if not m.draft and m.checks not in ("failing", "unverified"):
-            m.snapshot_required, why = _snapshot_requirement(m, base_sha)
+            m.snapshot_required, why = _snapshot_requirement(
+                m, base_sha, row.get("statusCheckRollup"))
             m.snapshot, m.snapshot_why = _snapshot_state(
                 m.sha, row.get("statusCheckRollup"), m.snapshot_required)
             m.snapshot_why = why or m.snapshot_why
@@ -1800,7 +1940,7 @@ def _is_ancestor(ancestor: str, descendant: str) -> bool:
     return git("merge-base", "--is-ancestor", ancestor, descendant, check=False).returncode == 0
 
 
-# The files of the release-procedure skill's seven-file version cut that
+# The files of the release-procedure skill's eight-file version cut that
 # lie inside the frozen package: the only package paths a cut may change,
 # label or no label.
 CUT_FROZEN_FILES = frozenset({"pseudolife_memory/compose/docker-compose.yml"})
@@ -3506,6 +3646,54 @@ def _check_stack_reuse(plan: Plan) -> StackSource | None:
     return record
 
 
+def _expect_refusal(expected: frozenset[int], admitted: set[int], why: dict[int, str],
+                    label: str, carried: dict[int, list[int]] | None = None) -> str | None:
+    """Why the members `build --expect` named differ from those admitted, or
+    None; `carried` maps an unnamed open pull request whose head the batch
+    holds to the members that carry it."""
+    carried = {n: by for n, by in (carried or {}).items() if n not in expected}
+    missing, extra = sorted(expected - admitted), sorted(admitted - expected)
+    if not missing and not extra and not carried:
+        return None
+    lines = [f"#{n} is left out: " + (why.get(n) or f"it is not an open pull request on {BASE} "
+                                      f"carrying `{label}`") for n in missing]
+    lines += [f"#{n} would be admitted, but --expect does not name it" for n in extra]
+    lines += [f"#{n}'s head is carried into the batch by "
+              + (", ".join(f"#{m}" for m in by) or "the batch head")
+              + f", so its change would land without #{n} being a member; make #{n} ready and "
+              f"labelled and name it, or take it off {'that branch' if len(by) < 2 else 'those branches'}"
+              for n, by in sorted(carried.items())]
+    named = ",".join(str(n) for n in sorted(expected))
+    return (f"the batch differs from --expect {named}, so nothing was built:\n  "
+            + "\n  ".join(lines)
+            + "\nfix what leaves a named member out, or name the members you mean, and build again")
+
+
+def _carried_open_prs(plan: Plan, base_sha: str) -> dict[int, list[int]]:
+    """Open pull requests other than the members whose head the batch head
+    holds and its base does not, each with the members that carry it: their
+    change is in the batch although they were not merged as members."""
+    merged = {m.number for m in plan.merged}
+    head = _out("rev-parse", "HEAD")
+    carried = {}
+    for row in _open_rows():
+        sha = row.get("headRefOid") or ""
+        if (row.get("number") in merged or not re.fullmatch(r"[0-9a-f]{40}", sha)
+                or not _has_commit(sha) or _is_ancestor(sha, base_sha) or not _is_ancestor(sha, head)):
+            continue
+        carried[row["number"]] = [m.number for m in plan.merged if _is_ancestor(sha, m.sha)]
+    return carried
+
+
+def _expected_members(text: str) -> frozenset[int]:
+    """`--expect 2012,2009`: the pull request numbers a build must admit."""
+    parts = [part.strip().removeprefix("#") for part in text.split(",")]
+    if not all(re.fullmatch(r"[1-9][0-9]*", part) for part in parts):
+        raise argparse.ArgumentTypeError(
+            f"expected comma-separated pull request numbers such as 2012,2009, not {text!r}")
+    return frozenset(int(part) for part in parts)
+
+
 def build(args: argparse.Namespace) -> int:
     if args.stacked or args.from_stacked:
         _require_clean_stack(Path.cwd())
@@ -3535,6 +3723,15 @@ def build(args: argparse.Namespace) -> int:
             if m.number in previous and m.sha != previous[m.number]:
                 raise Refusal(f"#{m.number}'s head moved since the stacked build; build and gate normally")
     waiting = [(m, _not_ready(m)) for m in members if _not_ready(m)]
+    if args.expect is not None:
+        # A named member that sits out stops the build before any merge; an
+        # unnamed one counts only once it merges (a conflict may drop it).
+        ready_now = {m.number for m in members} - {m.number for m, _ in waiting}
+        expect_why = {m.number: f"the open batch {parent.branch} it stacks on already holds it"
+                      for m in parent.merged} if parent else {}
+        expect_why.update((m.number, reason) for m, reason in waiting)
+        if refusal := _expect_refusal(args.expect, ready_now & args.expect, expect_why, args.label):
+            raise Refusal(refusal)
     if len(members) - len(waiting) < MIN_MEMBERS:
         print(f"{len(members) - len(waiting)} of {len(members)} pull request(s) "
               f"carrying `{args.label}` are ready (not a draft, CI on the head not "
@@ -3569,6 +3766,13 @@ def build(args: argparse.Namespace) -> int:
     judged = None
     try:
         judged = _merge_batch(plan, members)
+        if args.expect is not None:
+            # Before anything is saved, commented or checked: the finally
+            # below removes the branch this run made.
+            expect_why.update((d.member.number, d.reason) for d in plan.dropped)
+            if refusal := _expect_refusal(args.expect, {m.number for m in plan.merged}, expect_why,
+                                          args.label, _carried_open_prs(plan, base_sha)):
+                raise Refusal(refusal)
         plan.markers = _new_markers(base_sha)
         plan.head = _out("rev-parse", "HEAD")
         _harness_recipe(plan.head)  # Recheck after the generated metadata commit.
@@ -3859,17 +4063,19 @@ def _refuse_red_members(plan: Plan) -> None:
         if m.snapshot_required is None and _has_snapshot_selector(plan.base_sha):
             if _base_has_snapshot_admission(plan.base_sha):
                 raise Refusal("the plan lacks the base builder's snapshot admission; rebuild the batch")
-            # The batch can carry the first admission-aware opener while
-            # its master's builder still writes plans without these fields.
-            m.snapshot_required, why = _snapshot_requirement(m, plan.base_sha)
-            if m.snapshot_required is None:
-                raise Refusal(f"#{m.number}: {why}; nothing was opened, fix the cause and retry open")
         view = json.loads(gh("pr", "view", str(m.number), "--json",
                              "headRefOid,statusCheckRollup"))
+        if m.snapshot_required is None and _has_snapshot_selector(plan.base_sha):
+            # The batch can carry the first admission-aware opener while
+            # its master's builder still writes plans without these fields.
+            m.snapshot_required, why = _snapshot_requirement(m, plan.base_sha,
+                                                             view.get("statusCheckRollup"))
+            if m.snapshot_required is None:
+                raise Refusal(f"#{m.number}: {why}; nothing was opened, fix the cause and retry open")
         if view["headRefOid"] != m.sha:
             if plan.stacked_source:
                 raise Refusal(f"#{m.number}'s head moved since the stacked rebuild; build and gate normally")
-            if m.snapshot_required:
+            if m.snapshot_required or m.snapshot_ci_skip:
                 raise Refusal(f"#{m.number}'s head moved since snapshot admission; rebuild the batch")
             continue
         checks, why = _checks_why(view.get("statusCheckRollup"))
@@ -3882,6 +4088,13 @@ def _refuse_red_members(plan: Plan) -> None:
                           "failure this batch would carry. Drop it: switch back with "
                           f"`git switch --detach {REMOTE}/{BASE}`, remove the local "
                           "branch and build again (it sits out while its head is red)")
+        if m.snapshot_ci_skip and m.snapshot_required is False:
+            # A rerun since `build` may have run the Rust lanes after all.
+            skip, why = _scope_skip(m.sha, view.get("statusCheckRollup"))
+            if skip == "ran":
+                m.snapshot_required, m.snapshot_ci_skip = True, False
+            elif skip != "skipped":
+                raise Refusal(f"#{m.number}: {why}; nothing was opened")
         state, why = _snapshot_state(m.sha, view.get("statusCheckRollup"),
                                      m.snapshot_required if m.snapshot_required is not None else False)
         m.snapshot, m.snapshot_why = state, why
@@ -4478,14 +4691,40 @@ def _refuse_docs_during_batch(master: str) -> None:
                 raise Refusal(f"batch {branch} is built locally; {remedy}")
 
 
+# The identity of the local preview commit, which is never pushed: fixed, so
+# the preview does not depend on the operator's Git configuration.
+DOCS_PREVIEW_IDENTITY = ("-c", "user.name=ops/integrate.py merge-docs",
+                         "-c", "user.email=merge-docs@example.com")
+# Git's default rename handling, whatever the operator's configuration says,
+# so a merge GitHub can make is not refused as a local conflict.
+DOCS_PREVIEW_MERGE = ("-c", "merge.renames=true", "-c", "merge.directoryRenames=conflict")
+
+
 def _docs_preview(number: int, master: str, head: str) -> str:
-    ref = f"refs/pull/{number}/merge"
-    if git("fetch", "-q", "--no-tags", REMOTE, ref, check=False).returncode != 0:
-        raise Refusal(f"cannot fetch GitHub's test merge for #{number}; wait for it to be ready and retry")
-    preview = _out("rev-parse", "FETCH_HEAD")
-    if _out("rev-list", "--parents", "-n", "1", preview).split() != [preview, master, head]:
-        raise Refusal(f"GitHub's test merge for #{number} has a different base or head; wait for it to refresh and retry")
-    return preview
+    """The merge commit of `head` into `master` that the doc guards test.
+
+    It is computed here rather than fetched as GitHub's test merge
+    (refs/pull/N/merge), which GitHub can leave on an older base long after
+    master moves (#1992). The merge `merge_docs` lands has these parents, and
+    its tree is compared with this one after landing."""
+    merged = git(*DOCS_PREVIEW_MERGE, "merge-tree", "--write-tree", "--no-messages",
+                 master, head, check=False)
+    # A conflict still prints the tree first; exit 1 with no tree is an
+    # unreadable revision, which git reports with the same exit code.
+    tree = (merged.stdout or "").splitlines()[0] if (merged.stdout or "").strip() else ""
+    if merged.returncode == 1 and re.fullmatch(r"[0-9a-f]{40}", tree):
+        raise Refusal(f"#{number} conflicts with {BASE} at {master[:12]}; merge {BASE} into the PR "
+                      "and resolve the conflict, then retry")
+    if merged.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", tree):
+        cause = (merged.stderr or "").strip() or "no tree printed"
+        raise Refusal(f"cannot compute the merge of #{number} into {BASE}: `git merge-tree` exited "
+                      f"{merged.returncode} ({cause}); fix what it names (an unreadable commit, or a "
+                      "git older than 2.38) and retry")
+    if tree == _tree(master):
+        raise Refusal(f"#{number} changes nothing {BASE} does not already carry, so there is "
+                      "nothing to merge; close it, or push the change it still needs")
+    return _out(*DOCS_PREVIEW_IDENTITY, "commit-tree", tree, "-p", master, "-p", head,
+                "-m", f"Merge #{number} into {BASE} (merge-docs preview, never pushed)")
 
 
 _DOCS_SCOPE_RUNNER = """import json, pathlib, sys
@@ -4576,8 +4815,8 @@ def merge_docs(args: argparse.Namespace) -> int:
     view = _docs_pr_view(number)
     _, master = _preflight(require_master=False)
     recorded_base = view.get("baseRefOid")
-    # GitHub can report an older baseRefOid after master advances.
-    # The preview's parents below establish which base and head will be tested.
+    # GitHub can report an older baseRefOid after master advances. The
+    # preview below is the merge of this master and the fetched head.
     if recorded_base != master and not (
         isinstance(recorded_base, str)
         and re.fullmatch(r"[0-9a-f]{40}", recorded_base)
@@ -4708,6 +4947,9 @@ def main(argv: list[str] | None = None) -> int:
                         "creates, pushes and comments on nothing")
     b.add_argument("--date", default=dt.date.today().isoformat(),
                    help="batch date (default: today)")
+    b.add_argument("--expect", type=_expected_members, metavar="PR[,PR...]",
+                   help="the pull requests the batch must hold: exit non-zero and build "
+                        "nothing when one is left out or another is admitted")
     modes = b.add_mutually_exclusive_group()
     modes.add_argument("--stacked", action="store_true",
                        help="build a local-only batch on the sole open batch in a second worktree")

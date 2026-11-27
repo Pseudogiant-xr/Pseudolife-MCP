@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "3cee495f9aaa12fd",
+  "fingerprint": "e1248b6576dbe10e",
+  "reason": "The Live tests that read rust/ files step also runs tests/test_ci_release_cut.py (it names rust/ version files in its fixture repositories): two structure checks and six cases that build a small git repository each, a few seconds on two workers, and only on a Rust-only batch, push or merge group. The measured minutes hold."
+}

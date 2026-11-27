@@ -1,0 +1,62 @@
+# Warns before a hosted job outgrows its time limit (rust/ci/ci_headroom.py).
+# Once a day it reads the completed runs of every workflow with activity in
+# the last two days (a rerun included), every attempt of every job, and
+# compares each with the bounds on master: the job's timeout-minutes, and ops/ci_tests.sh's pytest bound for
+# the selection that run used (from its test-diagnostics artifact). A run
+# at 80% or more of a bound is listed in one issue, which keeps each near miss
+# for 14 days or until its bound is raised and closes itself when none is
+# left. On 26 November 2026 the 0.26.0 cut batch lost three attempts to a
+# bound a run had already come within a minute of on 25 November.
+#
+# The run is red only when the check itself cannot run; a near miss is the
+# issue, never a red run, because nothing reads a red scheduled run.
+# Not a pull-request workflow, so it takes no slot from a batch: one
+# ubuntu-latest job of about 3 minutes a day and about 310 API calls (two
+# days of activity; rust/ci/ci_headroom.py SYNC_DAYS says how that was counted).
+name: CI headroom
+
+on:
+  schedule:
+    # 20:41 UTC: 07:41 AEDT, after the 02:17 AEDT nightly and its weekly
+    # frozen-inclusive suite have finished.
+    - cron: "41 20 * * *"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Read the runs with activity (a finish or a rerun) in the last N days (1 to 3)
+        default: "2"
+        type: string
+
+permissions:
+  contents: read
+
+# One check at a time, so two cannot open two issues.
+concurrency:
+  group: ci-headroom
+  cancel-in-progress: false
+
+jobs:
+  headroom:
+    name: CI headroom
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # The runs, their jobs and their test-diagnostics artifacts.
+      actions: read
+      # The one issue it opens, updates and closes.
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the workflow reader
+        run: python -m pip install --no-compile pyyaml
+      - name: Check every bound against recent runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DAYS: ${{ inputs.days || '2' }}
+        run: python rust/ci/ci_headroom.py sync --days "$DAYS"

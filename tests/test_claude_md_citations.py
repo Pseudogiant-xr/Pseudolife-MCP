@@ -25,7 +25,9 @@ ROOT = Path(__file__).resolve().parents[1]
 CLAUDE_MD = ROOT / "CLAUDE.md"
 # Raised from 4,800 on 24 November 2026 by the maintainer's ruling, to admit
 # one rule: a Codex session run by T3 Code parks as next-turn-only.
-WORD_CEILING = 4_850
+# Raised from 4,850 on 27 November 2026 by the maintainer's ruling, to admit
+# one rule: the conductor checks for private security reports daily.
+WORD_CEILING = 4_900
 
 # Files whose mentions of CLAUDE.md are history or generated copies, not citations.
 SKIP = ("CLAUDE.md", "CHANGELOG.md", "llms.txt", "llms-full.txt", "tests/test_claude_md_citations.py")

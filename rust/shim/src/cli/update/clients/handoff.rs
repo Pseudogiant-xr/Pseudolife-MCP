@@ -24,8 +24,11 @@ use std::{
 };
 
 pub const CLIENT_HANDOFF: &str = "client-handoff-v1";
+/// The whole release-mode update, handed to the target release's own
+/// updater before any daemon step (`super::super::full_handoff`).
+pub const FULL_UPDATE: &str = "full-update-v1";
 /// The hand-off protocols this updater accepts as a child.
-pub const PROTOCOLS: &[&str] = &[CLIENT_HANDOFF];
+pub const PROTOCOLS: &[&str] = &[CLIENT_HANDOFF, FULL_UPDATE];
 pub const HANDOFF_ENV: &str = "PSEUDOLIFE_UPDATE_HANDOFF";
 pub const HANDOFF_REPORT_ENV: &str = "PSEUDOLIFE_UPDATE_HANDOFF_REPORT";
 /// The handing-off updater's runtime directory. A Python child holds exactly
@@ -37,12 +40,12 @@ pub const HANDOFF_RUNTIME_ENV: &str = "PSEUDOLIFE_UPDATE_HANDOFF_RUNTIME";
 pub const PROBE: &str = "--client-handoff-protocols";
 /// Answered by every native updater, including those that predate
 /// [`PROBE`]: it proves the runtime starts before its protocols are read.
-const START_PROBE: &str = "--native-capability";
-const START_PROBE_ANSWER: &str = "pseudolife-mcp native-update-v1";
-const WINDOWS_DLL_NOT_FOUND: i32 = 0xC000_0135_u32 as i32;
+pub(crate) const START_PROBE: &str = "--native-capability";
+pub(crate) const START_PROBE_ANSWER: &str = "pseudolife-mcp native-update-v1";
+pub(crate) const WINDOWS_DLL_NOT_FOUND: i32 = 0xC000_0135_u32 as i32;
 /// Exit code when a client step failed after the daemon side succeeded.
 pub const CLIENT_STEP_FAILED: u8 = 5;
-const PROBE_TIMEOUT: Duration = Duration::from_secs(120);
+pub(crate) const PROBE_TIMEOUT: Duration = Duration::from_secs(120);
 /// No step in the child may run longer than its own timeouts; this only
 /// bounds a child that hangs outside them.
 const CHILD_TIMEOUT: Duration = Duration::from_secs(4 * 3600);
@@ -157,6 +160,28 @@ pub trait Spawner {
         env: &[(String, OsString)],
         quiet: bool,
     ) -> Result<i32, String>;
+}
+
+/// How a full hand-off child ended.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Spawned {
+    /// It exited: its code (128 + the signal when one ended it).
+    Exited(i32),
+    /// It never ran: nothing was changed.
+    NotStarted(String),
+    /// It ran, and waiting for it to the end failed.
+    Failed(String),
+}
+
+/// Runs the full hand-off child to completion (`full_handoff`).
+pub trait FullRun {
+    fn run(
+        &self,
+        executable: &Path,
+        args: &[String],
+        env: &[(String, OsString)],
+        quiet: bool,
+    ) -> Spawned;
 }
 
 /// What the parent shows while the hand-off proceeds, in order.
@@ -404,7 +429,7 @@ pub fn hand_off(
     Some((report, Some(outcome)))
 }
 
-fn truncate(text: &str, limit: usize) -> &str {
+pub(crate) fn truncate(text: &str, limit: usize) -> &str {
     match text.char_indices().nth(limit) {
         Some((index, _)) => &text[..index],
         None => text,
@@ -424,13 +449,57 @@ impl Spawner for NativeSpawner {
         env: &[(String, OsString)],
         quiet: bool,
     ) -> Result<i32, String> {
+        spawn_contained(executable, args, env, quiet, false).map_err(|e| match e {
+            Spawned::NotStarted(why) | Spawned::Failed(why) => why,
+            Spawned::Exited(code) => format!("exit {code}"),
+        })
+    }
+}
+
+/// Starts the target release's updater for the whole update
+/// (`full_handoff`). Unlike [`NativeSpawner`] it inherits stdin, so an
+/// attended run's prompts work, and on Unix it stays in this process's
+/// process group: a background group that reads the terminal is stopped
+/// (SIGTTIN). The terminal delivers Ctrl-C, Ctrl-\ and a hang-up to the
+/// whole group, so this process forwards only a signal a process sent it,
+/// and it waits for the child's own cleanup instead of killing it. A signal
+/// ends the child, not this process: its exit (128 + the signal when it died
+/// by one) is the result.
+pub struct FullSpawner;
+impl FullRun for FullSpawner {
+    fn run(
+        &self,
+        executable: &Path,
+        args: &[String],
+        env: &[(String, OsString)],
+        quiet: bool,
+    ) -> Spawned {
+        match spawn_contained(executable, args, env, quiet, true) {
+            Ok(code) => Spawned::Exited(code),
+            Err(outcome) => outcome,
+        }
+    }
+}
+
+/// `Err` is [`Spawned::NotStarted`] or [`Spawned::Failed`].
+fn spawn_contained(
+    executable: &Path,
+    args: &[String],
+    env: &[(String, OsString)],
+    quiet: bool,
+    full: bool,
+) -> Result<i32, Spawned> {
+    use Spawned::{Failed, NotStarted};
+    {
         use std::io::Write;
         #[cfg(unix)]
         let _signals = super::super::signals::Guard::new()
-            .map_err(|_| "cannot install command cancellation handlers".to_owned())?;
+            .map_err(|_| NotStarted("cannot install command cancellation handlers".to_owned()))?;
         #[cfg(unix)]
         if super::super::signals::checkpoint() != 0 {
-            return Err("the update was interrupted before the hand-off".into());
+            return Err(NotStarted(
+                "the update was interrupted before the hand-off".into(),
+            ));
         }
         let _ = std::io::stdout().flush();
         let _ = std::io::stderr().flush();
@@ -443,16 +512,20 @@ impl Spawner for NativeSpawner {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .map_err(|e| format!("cannot start the hand-off runtime: {e}"))?;
+                .map_err(|e| NotStarted(format!("cannot start the hand-off runtime: {e}")))?;
             runtime.block_on(async move {
                 use process_wrap::tokio::{CommandWrap, KillOnDrop};
                 #[cfg(windows)]
                 let job = super::super::windows_job::Job::new()
-                    .map_err(|_| "cannot contain the new runtime's process".to_owned())?;
+                    .map_err(|_| NotStarted("cannot contain the new runtime's process".to_owned()))?;
                 let mut command = CommandWrap::with_new(&executable, |c| {
                     #[cfg(windows)]
                     c.creation_flags(windows_sys::Win32::System::Threading::CREATE_SUSPENDED);
-                    c.args(&args).stdin(Stdio::null());
+                    c.args(&args).stdin(if full {
+                        Stdio::inherit()
+                    } else {
+                        Stdio::null()
+                    });
                     if quiet {
                         c.stdout(Stdio::null()).stderr(Stdio::null());
                     } else {
@@ -464,13 +537,15 @@ impl Spawner for NativeSpawner {
                 });
                 command.wrap(KillOnDrop);
                 #[cfg(unix)]
-                command.wrap(process_wrap::tokio::ProcessGroup::leader());
+                if !full {
+                    command.wrap(process_wrap::tokio::ProcessGroup::leader());
+                }
                 let mut child = command.spawn().map_err(|e| {
-                    if e.kind() == std::io::ErrorKind::NotFound {
+                    NotStarted(if e.kind() == std::io::ErrorKind::NotFound {
                         format!("{} is missing", executable.display())
                     } else {
                         format!("{} could not be started: {e}", executable.display())
-                    }
+                    })
                 })?;
                 #[cfg(windows)]
                 if child
@@ -481,51 +556,108 @@ impl Spawner for NativeSpawner {
                 {
                     let _ = child.start_kill();
                     let _ = child.wait().await;
-                    return Err("cannot contain the new runtime's process".into());
+                    // It was still suspended: it never ran.
+                    return Err(NotStarted(
+                        "cannot contain the new runtime's process".into(),
+                    ));
                 }
                 #[cfg(unix)]
                 let group = child.id();
-                let wait = async { child.wait().await };
                 #[cfg(unix)]
-                let result = tokio::select! {
-                    biased;
-                    signal = super::super::signals::wait(group) => {
-                        super::super::signals::terminate(&mut *child, signal).await;
-                        return Err(format!("the update was interrupted (signal {signal})"));
+                let result = if full {
+                    // The child shares the terminal's process group: it got
+                    // the terminal's signals itself and owns its cleanup.
+                    let timed = super::super::signals::timeout(CHILD_TIMEOUT, child.wait());
+                    tokio::pin!(timed);
+                    loop {
+                        tokio::select! {
+                            biased;
+                            signal = super::super::signals::wait(None) => {
+                                let (_, from_process) = super::super::signals::take();
+                                // The terminal's own signals reached the
+                                // child already; pass on one a process sent
+                                // to this pid alone.
+                                if from_process && let Some(pid) = group {
+                                    forward(pid, signal);
+                                }
+                            }
+                            result = &mut timed => {
+                                // A signal after the child's exit is not
+                                // raised again over its result.
+                                super::super::signals::take();
+                                break result;
+                            }
+                        }
                     }
-                    result = super::super::signals::timeout(CHILD_TIMEOUT, wait) => result,
+                } else {
+                    let wait = async { child.wait().await };
+                    tokio::select! {
+                        biased;
+                        signal = super::super::signals::wait(group) => {
+                            super::super::signals::terminate(&mut *child, signal).await;
+                            return Err(Failed(format!("the update was interrupted (signal {signal})")));
+                        }
+                        result = super::super::signals::timeout(CHILD_TIMEOUT, wait) => result,
+                    }
                 };
                 #[cfg(not(unix))]
-                let result = tokio::time::timeout(CHILD_TIMEOUT, wait).await;
+                let result = tokio::time::timeout(CHILD_TIMEOUT, child.wait()).await;
                 match result {
                     Ok(Ok(status)) => {
                         // Release the kill-on-close limit only after a normal
                         // exit, so a tunnel the child started outlives it.
                         #[cfg(windows)]
-                        job.complete()
-                            .map_err(|_| "cannot release the new runtime's helpers".to_owned())?;
+                        job.complete().map_err(|_| {
+                            Failed("cannot release the new runtime's helpers".to_owned())
+                        })?;
+                        #[cfg(unix)]
+                        if full
+                            && let Some(signal) =
+                                std::os::unix::process::ExitStatusExt::signal(&status)
+                        {
+                            return Ok(128 + signal);
+                        }
                         Ok(status.code().unwrap_or(1))
                     }
                     result => {
                         // Kill the whole job or process group, not only its
                         // leader, before this run releases the update lock.
+                        // The full hand-off child leads no group: it is asked
+                        // to stop first, so its own cleanup stops the commands
+                        // it runs in theirs (they keep the lock's file open).
+                        #[cfg(unix)]
+                        if full && let Some(pid) = group {
+                            forward(pid, libc::SIGTERM);
+                            let _ = tokio::time::timeout(Duration::from_secs(60), child.wait()).await;
+                        }
                         #[cfg(windows)]
                         drop(job);
                         let _ = child.start_kill();
                         let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
-                        Err(match result {
+                        Err(Failed(match result {
                             Ok(Err(e)) => format!("waiting for it failed: {e}"),
                             _ => format!(
                                 "it ran longer than {} hours",
                                 CHILD_TIMEOUT.as_secs() / 3600
                             ),
-                        })
+                        }))
                     }
                 }
             })
         })
         .join()
-        .map_err(|_| "the hand-off worker failed".to_owned())?
+        .map_err(|_| Failed("the hand-off worker failed".to_owned()))?
+    }
+}
+
+/// Sends `signal` to the full hand-off child alone (it is no group leader).
+#[cfg(unix)]
+#[allow(unsafe_code)]
+fn forward(pid: u32, signal: i32) {
+    if let Ok(pid) = libc::pid_t::try_from(pid) {
+        // SAFETY: a plain kill(2) of the child this process spawned and still
+        // waits for, so its pid cannot have been reused yet.
+        unsafe { libc::kill(pid, signal) };
     }
 }
 

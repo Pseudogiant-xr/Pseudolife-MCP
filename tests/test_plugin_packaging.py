@@ -214,6 +214,17 @@ def test_server_json_versions_match_pyproject():
     assert match, "ops/docker-compose.yml must pin the daemon image tag to a version"
     assert match.group(1) == release
 
+    # The stack-manager file runs the Rust daemon, whose image is published
+    # under its release version only: its default tag moves with the cut.
+    stack = _read("ops/docker-compose.stack.yml")
+    match = re.search(
+        r"^\s*image:\s*ghcr\.io/pseudogiant-xr/pseudolife-daemon-rust:\$\{PSEUDOLIFE_IMAGE_TAG:-([^}]+)\}$",
+        stack,
+        re.M,
+    )
+    assert match, "ops/docker-compose.stack.yml must default the Rust daemon image tag to a version"
+    assert match.group(1) == release
+
 
 def test_the_native_crates_report_the_release_version():
     """The Rust daemon reports its crate version on /health, and the shims
