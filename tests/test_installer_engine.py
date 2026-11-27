@@ -188,7 +188,7 @@ def test_rerun_on_an_accepted_host_reproduces_the_overlay_without_pulling(helper
     assert module.accept() == "unchanged"
 
 
-@pytest.mark.parametrize("failure,expected", [("pull", "--engine python"), ("provision", "models")])
+@pytest.mark.parametrize("failure,expected", [("pull", "registry access"), ("provision", "models")])
 def test_rust_refuses_before_any_container_when_the_image_or_models_are_unavailable(helper, failure, expected):
     module, state, repo = helper
     state["fail"] = failure
@@ -325,7 +325,7 @@ def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, 
     assert "cannot mint one" in output and "Nothing was pulled or started" in output
     assert "--engine python" not in output and "-Engine python" not in output, output
     assert "no bearer token for the default Rust daemon" not in output, output
-    assert ("moves to Rust after the install, and that move needs the token too" in output) == (installed == "python" or bank), output
+    assert ("moves to the Rust daemon after the install, and that move needs the token too" in output) == (installed == "python" or bank), output
     assert [call for call in calls if "prepare" in call] == []
 
 
@@ -363,9 +363,9 @@ def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script
     assert "python after all" not in output, output
     if expected == "refused":
         assert proc.returncode == 2, output
-        assert "needs its bearer token" in output and "The daemon was not started" in output
+        assert "needs its bearer token" in output and "Nothing was started" in output
         assert "--engine python" not in output and "-Engine python" not in output, output
-        assert ("moves to Rust after the install, and that move needs the token too" in output) == (switch == "rust"), output
+        assert ("moves to the Rust daemon after the install, and that move needs the token too" in output) == (switch == "rust"), output
         return
     assert proc.returncode == 0, output
     result = next(line for line in output.splitlines() if line.startswith("RESULT:"))
@@ -373,7 +373,7 @@ def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script
     assert engine == expected and files
 
 
-MOVE_NEEDS_TOKEN = "moves to Rust after the install, and that move needs the token too"
+MOVE_NEEDS_TOKEN = "moves to the Rust daemon after the install, and that move needs the token too"
 
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
@@ -463,7 +463,7 @@ def test_stage_5b_tells_a_python_host_the_move_needs_the_token(tmp_path, script,
                          + 'echo "RESULT:$COMPOSE_ENGINE"\n')
         output = proc.stdout + proc.stderr
     assert proc.returncode == 2, output
-    assert "needs its bearer token" in output and "The daemon was not started" in output, output
+    assert "needs its bearer token" in output and "Nothing was started" in output, output
     assert "--engine python" not in output and "-Engine python" not in output, output
     assert (MOVE_NEEDS_TOKEN in output) == (switch == "rust"), output
 
@@ -631,10 +631,12 @@ def test_a_foreign_unfinished_rust_container_is_refused_before_the_bearer(tmp_pa
         assert "needs its bearer token" not in output, output
     else:
         # The near miss: this checkout's own unfinished install keeps the
-        # bearer refusal, and its Python rerun, which works there.
+        # bearer refusal, and no Python rerun is offered (the Python daemon
+        # is retired).
         assert proc.returncode == 2, output
         assert "needs its bearer token" in output and "Nothing was pulled or started" in output, output
         assert python_way not in output, output
+        assert "engine python" not in output, output
         assert "docker rm -f" not in output, output
     assert "RESULT:" not in output
 
@@ -669,7 +671,7 @@ def test_python_and_checkout_selections(helper):
 def test_unreleased_checkout_version_refuses_rust(helper):
     module, state, repo = helper
     _write_crate(repo, "0.23.0.dev1")
-    with pytest.raises(module.Refusal, match="--engine python"):
+    with pytest.raises(module.Refusal, match="check out a release tag"):
         module.prepare(repo, "rust")
     assert not state["calls"] or all(c[0] == "inspect" for c in state["calls"])
 
@@ -680,7 +682,7 @@ def test_the_checkout_version_is_the_native_crate_not_pyproject(helper):
     module, state, repo = helper
     (repo / "pyproject.toml").write_text('[project]\nversion = "0.99.0"\n')
     assert module.checkout_version(repo) == "0.23.0"
-    message = "this checkout's rust/shim/Cargo.toml; rerun with --engine python"
+    message = "this checkout's rust/shim/Cargo.toml; check out a release tag"
     (repo / "rust" / "shim" / "Cargo.toml").write_text('[package]\nname = "pseudolife-stdio"\n')
     with pytest.raises(module.Unavailable, match=message):
         module.checkout_version(repo)

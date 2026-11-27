@@ -45,10 +45,9 @@
 # PSEUDOLIFE_SHIM_ENGINE=native.
 # -NoToken (switch): open-loopback install - mint no bearer token, so the
 #   agent board stays off.
-# -Engine rust|python: the Docker daemon. rust pulls the release's published
-#   Rust image; a rerun keeps the engine installed (default for a new
-#   install: rust, or python without a bearer or a published image); naming the other engine switches it through
-#   pseudolife-mcp update.
+# -Engine rust: the Docker daemon, the release's published Rust image (the
+#   default; the Python daemon is retired, and a host still on it moves to
+#   Rust through pseudolife-mcp update).
 # -TestLogin (switch): also give the test suite its own Postgres login, which
 #   cannot open the bank (`pseudolife-mcp test-login create`): for
 #   contributors who run the suite against this server; off by default.
@@ -1428,7 +1427,7 @@ function Test-ShimToolingReady($python) {
 # with the token.
 function Get-BearerRefusalWays {
     if ($switchEngine -ne 'rust') { return @{ Switch = '' } }
-    return @{ Switch = " This host's Python daemon moves to Rust after the install, and that move needs the token too, and the shim (pipx or a pip-capable Python >= 3.10)." }
+    return @{ Switch = " This host moves to the Rust daemon after the install, and that move needs the token too, and the shim (pipx or a pip-capable Python >= 3.10)." }
 }
 # <<< bearer refusal ways <<<
 # >>> daemon engine >>>
@@ -1495,7 +1494,7 @@ if (-not $ClientOnly) {
     # A Rust engine always comes with its overlay; without one the base file
     # would start the retired Python image, so the install stops instead.
     if ($composeEngine -eq 'rust' -and $engineFiles.Count -eq 0) {
-        [Console]::Error.WriteLine("The native client's engine step prepared no Rust daemon overlay, so this install would start the retired Python daemon; rerun the installer (it refreshes the native client). Nothing was started.")
+        [Console]::Error.WriteLine("The engine step (ops/installer_engine.py) prepared no Rust daemon overlay, so this install would start the retired Python daemon; update this checkout to a release (git checkout v<version>) and rerun. Nothing was started.")
         exit 1
     }
     if ($switchEngine) { Step "Daemon engine: $($composeEngine -replace '-checkout$', '') for now; switching to $switchEngine after the install" }
@@ -1659,7 +1658,7 @@ if ($ClientOnly) {
 if (($composeEngine -eq 'rust' -or $switchEngine -eq 'rust') -and $tokenState -notin 'minted', 'present') {
     # As at stage 4b (the bearer refusal ways).
     $ways = Get-BearerRefusalWays
-    [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun.$($ways.Switch) The daemon was not started; the Rust image and models stay downloaded for the rerun.")
+    [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun.$($ways.Switch) Nothing was started; any Rust image and models already downloaded stay for the rerun.")
     exit 2
 }
 # <<< engine token <<<
@@ -3754,18 +3753,18 @@ if ($switchEngine) {
     if ($switchVersion) { $switchArgs += @('--tag', "$switchVersion") }
     else {
         # Without --tag, update would move to the newest release instead.
-        [Console]::Error.WriteLine("The installed daemon was kept: its version could not be read from http://127.0.0.1:8765/health, so the switch to $switchEngine did not run. Run: pseudolife-mcp update --engine $switchEngine --daemon-only --tag <the daemon's version>")
+        [Console]::Error.WriteLine("The installed daemon (still the retired Python daemon) was kept: its version could not be read from http://127.0.0.1:8765/health, so the switch to $switchEngine did not run. Run: pseudolife-mcp update --engine $switchEngine --daemon-only --tag <the daemon's version>")
         exit 1
     }
     if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
-        [Console]::Error.WriteLine("The installed daemon was kept; switching it to $switchEngine needs the pseudolife-mcp shim, which is unavailable (see above). Run: pseudolife-mcp $($switchArgs -join ' ')")
+        [Console]::Error.WriteLine("The installed daemon (still the retired Python daemon) was kept; switching it to $switchEngine needs the pseudolife-mcp shim, which is unavailable (see above). Run: pseudolife-mcp $($switchArgs -join ' ')")
         exit 1
     }
     Step "Switching the daemon to $switchEngine (backup, rollback tag and health gate)..."
     # Stdin closed: update's own questions take their defaults, never hang.
     $null | & $script:shimInstallPath @switchArgs
     if ($LASTEXITCODE -ne 0) {
-        [Console]::Error.WriteLine("The switch to $switchEngine failed; its output above says what changed and how to roll back. Retry with: $($script:shimInstallPath) $($switchArgs -join ' ')")
+        [Console]::Error.WriteLine("The switch to $switchEngine failed, so this host still runs the retired Python daemon; its output above says what changed and how to roll back. Retry with: $($script:shimInstallPath) $($switchArgs -join ' ')")
         exit 1
     }
 }

@@ -146,7 +146,7 @@ def checkout_version(repo: Path) -> str:
         version = None
     if not version or not up.plain_release(version):
         raise Unavailable(f"Cannot read a release version from this checkout's {manifest}; "
-                          "rerun with --engine python. Nothing was started.")
+                          "check out a release tag (git checkout v<version>) and rerun. Nothing was started.")
     return version
 
 
@@ -212,8 +212,8 @@ def provision(image: str) -> None:
     except Refusal:
         pulled = False  # a pull that timed out: Rust is unavailable here, not Docker
     if not pulled:
-        raise Unavailable(f"Cannot pull {image}: this release may not publish a Rust daemon image. Rerun with "
-                      "--engine python (-Engine python) to install the Python daemon. Nothing was started.")
+        raise Unavailable(f"Cannot pull {image}: check the network and registry access, or check out a release "
+                          "that publishes its Rust daemon image, then rerun. Nothing was started.")
     volume = f"{PROJECT}_{MODELS_VOLUME}"
     found = docker("volume", "inspect", volume)
     if found.returncode:
@@ -225,8 +225,8 @@ def provision(image: str) -> None:
     if docker("run", "--rm", "-e", f"PSEUDOLIFE_DAEMON_MODELS_DIR={MODELS_DIR}", "-v", f"{volume}:{MODELS_DIR}",
               "--entrypoint", "pseudolife-daemon", image,
               "provision", "models", "--if-missing", capture=False, timeout=3600).returncode:
-        raise Unavailable("Cannot provision the Rust daemon's models; check network access and disk space, then rerun "
-                      "(or rerun with --engine python). Nothing was started.")
+        raise Unavailable("Cannot provision the Rust daemon's models; check network access and disk space, then rerun. "
+                          "Nothing was started.")
 
 
 def refuse_foreign_unaccepted(found: dict | None, version: str) -> None:
@@ -328,8 +328,10 @@ def accept(url: str = up.DEFAULT_DAEMON_URL) -> str:
         raise Refusal(f"The daemon reports version {state.get('version')}, not the {release} this install started; "
                       "check docker compose ps for the daemon's image and rerun." + unrecorded)
     if state.get("counters_import_required"):
-        raise Refusal("The Rust daemon reports counters still to import from memory_state/weights.pt; install with "
-                      "--engine python, then switch with pseudolife-mcp update --engine rust." + unrecorded)
+        raise Refusal("The Rust daemon reports counters still to import from memory_state/weights.pt, which only "
+                      "pseudolife-mcp update imports: remove this unfinished daemon (docker rm -f "
+                      "pseudolife-mcp-daemon; the bank's volumes stay) and rerun the installer, which brings the "
+                      "bank up as it is and moves it to Rust through that update." + unrecorded)
     schema = image_schema(service["image"])
     if schema is None or state.get("schema") != schema:
         raise Refusal(f"The daemon reports schema {state.get('schema')}, and the image's own schema could not be read "
@@ -339,8 +341,7 @@ def accept(url: str = up.DEFAULT_DAEMON_URL) -> str:
         # update verifies a Rust daemon with an authenticated read: without a
         # bearer the host could never be updated.
         raise Refusal("The Rust daemon runs without a bearer token, so pseudolife-mcp update could not verify it; "
-                      "rerun the installer without --no-token (its token step names any failure), or use "
-                      "--engine python." + unrecorded)
+                      "rerun the installer without --no-token (its token step names any failure)." + unrecorded)
     if not eng.authenticated_read(url, token):
         raise Refusal("The Rust daemon refused an authenticated bank read with its own bearer; check docker logs "
                       "pseudolife-mcp-daemon and rerun." + unrecorded)

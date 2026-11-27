@@ -509,7 +509,7 @@ fn prepare(repo: &Path, engine: &str, default: bool) -> Result<Vec<PathBuf>> {
             repo.display().to_string()
         };
         return Err(refusal(format!(
-            "This host runs a Rust daemon selected by checkout-mode update, which the installer does not rebuild. Update it with pseudolife-mcp update --checkout {repo}. Nothing was started."
+            "This host runs a Rust daemon selected by checkout-mode update, which the installer does not rebuild. Update it with pseudolife-mcp update --checkout {repo}, or switch it back with pseudolife-mcp update --engine python --checkout {repo} and rerun the installer. Nothing was started."
         )));
     }
     let found = labels()?;
@@ -752,7 +752,7 @@ fn accept(url: &str) -> Result<&'static str> {
     }
     if truthy(&state["counters_import_required"]) {
         return Err(refusal(format!(
-            "The Rust daemon reports counters still to import from memory_state/weights.pt, which pseudolife-mcp update imports before it moves a bank to Rust: run pseudolife-mcp update, then rerun the installer.{unrecorded}"
+            "The Rust daemon reports counters still to import from memory_state/weights.pt, which only pseudolife-mcp update imports: remove this unfinished daemon (docker rm -f pseudolife-mcp-daemon; the bank's volumes stay) and rerun the installer, which brings the bank up as it is and moves it to Rust through that update.{unrecorded}"
         )));
     }
     let schema = image_schema(service["image"].as_str().unwrap_or_default());

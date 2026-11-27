@@ -1819,7 +1819,7 @@ if (-not $ClientOnly) {
 # pseudolife-mcp update makes it and verifies the Rust daemon with it.
 function Get-BearerRefusalWays {
     if ($switchEngine -ne 'rust') { return @{ Switch = '' } }
-    return @{ Switch = " This host's Python daemon moves to Rust after the install, and that move needs the token too." }
+    return @{ Switch = " This host moves to the Rust daemon after the install, and that move needs the token too." }
 }
 # <<< bearer refusal ways <<<
 # >>> daemon engine >>>
@@ -2049,7 +2049,7 @@ if ($ClientOnly) {
 if (($composeEngine -eq 'rust' -or $switchEngine -eq 'rust') -and $tokenState -notin 'minted', 'present') {
     # As at stage 4b (the bearer refusal ways).
     $ways = Get-BearerRefusalWays
-    [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without -NoToken and -Transport http so the installer mints one.$($ways.Switch) The daemon was not started; the Rust image and models stay downloaded for the rerun.")
+    [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without -NoToken and -Transport http so the installer mints one.$($ways.Switch) Nothing was started; any Rust image and models already downloaded stay for the rerun.")
     exit 2
 }
 # <<< engine token <<<
@@ -4169,18 +4169,18 @@ if ($switchEngine) {
     if ($switchVersion) { $switchArgs += @('--tag', "$switchVersion") }
     else {
         # Without --tag, update would move to the newest release instead.
-        [Console]::Error.WriteLine("The installed daemon was kept: its version could not be read from http://127.0.0.1:8765/health, so the switch to $switchEngine did not run. Run: pseudolife-mcp update --engine $switchEngine --daemon-only --tag <the daemon's version>")
+        [Console]::Error.WriteLine("The installed daemon (still the retired Python daemon) was kept: its version could not be read from http://127.0.0.1:8765/health, so the switch to $switchEngine did not run. Run: pseudolife-mcp update --engine $switchEngine --daemon-only --tag <the daemon's version>")
         exit 1
     }
     if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
-        [Console]::Error.WriteLine("The installed daemon was kept; switching it to $switchEngine needs the pseudolife-mcp shim, which is unavailable (see above). Run: pseudolife-mcp $($switchArgs -join ' ')")
+        [Console]::Error.WriteLine("The installed daemon (still the retired Python daemon) was kept; switching it to $switchEngine needs the pseudolife-mcp shim, which is unavailable (see above). Run: pseudolife-mcp $($switchArgs -join ' ')")
         exit 1
     }
     Step "Switching the daemon to $switchEngine (backup, rollback tag and health gate)..."
     # Stdin closed: update's own questions take their defaults, never hang.
     $null | & $script:shimInstallPath @switchArgs
     if ($LASTEXITCODE -ne 0) {
-        [Console]::Error.WriteLine("The switch to $switchEngine failed; its output above says what changed and how to roll back. Retry with: $($script:shimInstallPath) $($switchArgs -join ' ')")
+        [Console]::Error.WriteLine("The switch to $switchEngine failed, so this host still runs the retired Python daemon; its output above says what changed and how to roll back. Retry with: $($script:shimInstallPath) $($switchArgs -join ' ')")
         exit 1
     }
 }

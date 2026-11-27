@@ -74,7 +74,7 @@ def test_a_bearer_the_install_cannot_mint_is_decided_before_anything_is_pulled(t
     assert "--engine python" not in output and "-Engine python" not in output, output
     assert "no bearer token for the default Rust daemon" not in output, output
     # A host that moves after the install is told the move needs the token too.
-    assert ("moves to Rust after the install, and that move needs the token too" in output) == (installed == "python" or bank), output
+    assert ("moves to the Rust daemon after the install, and that move needs the token too" in output) == (installed == "python" or bank), output
     # The cause is the flag this install was given, never missing pip tooling
     # (#1609): the native client needs no pipx or pip.
     assert ("-NoToken" if script.endswith(".ps1") else "--no-token") in output, output
@@ -120,9 +120,9 @@ def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script
     assert "python after all" not in output, output
     if expected == "refused":
         assert proc.returncode == 2, output
-        assert "needs its bearer token" in output and "The daemon was not started" in output
+        assert "needs its bearer token" in output and "Nothing was started" in output
         assert "--engine python" not in output and "-Engine python" not in output, output
-        assert ("moves to Rust after the install, and that move needs the token too" in output) == (switch == "rust"), output
+        assert ("moves to the Rust daemon after the install, and that move needs the token too" in output) == (switch == "rust"), output
         return
     assert proc.returncode == 0, output
     result = next(line for line in output.splitlines() if line.startswith("RESULT:"))
@@ -184,7 +184,7 @@ def test_a_host_still_on_python_moves_to_rust_after_the_install(tmp_path, script
     assert proc.returncode == 2, output
     assert "needs its bearer token" in output and "Nothing was pulled or started" in output, output
     assert "--engine python" not in output and "-Engine python" not in output, output
-    assert ("moves to Rust after the install, and that move needs the token too" in output) == moves, output
+    assert ("moves to the Rust daemon after the install, and that move needs the token too" in output) == moves, output
     assert [call for call in shell.logged() if "prepare" in call] == []
 
 
@@ -213,9 +213,9 @@ def test_stage_5b_tells_a_python_host_the_move_needs_the_token(tmp_path, script,
                          + 'echo "RESULT:$COMPOSE_ENGINE"\n')
         output = proc.stdout + proc.stderr
     assert proc.returncode == 2, output
-    assert "needs its bearer token" in output and "The daemon was not started" in output, output
+    assert "needs its bearer token" in output and "Nothing was started" in output, output
     assert "--engine python" not in output and "-Engine python" not in output, output
-    assert ("moves to Rust after the install, and that move needs the token too" in output) == (switch == "rust"), output
+    assert ("moves to the Rust daemon after the install, and that move needs the token too" in output) == (switch == "rust"), output
 
 
 @pytest.mark.parametrize("script", ["install-native.sh", "install-native.ps1"])

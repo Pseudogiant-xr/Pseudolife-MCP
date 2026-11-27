@@ -1500,7 +1500,7 @@ sys.exit(1 if sys.prefix == sys.base_prefix and os.path.exists(marker) else 0)' 
 engine_switch_way() {
     switch_way=""
     [ "${SWITCH_ENGINE:-}" = rust ] || return 0
-    switch_way=" This host's Python daemon moves to Rust after the install, and that move needs the token too, and the shim (pipx or a pip-capable Python >= 3.10)."
+    switch_way=" This host moves to the Rust daemon after the install, and that move needs the token too, and the shim (pipx or a pip-capable Python >= 3.10)."
 }
 # <<< bearer refusal ways <<<
 # >>> daemon engine >>>
@@ -1561,7 +1561,7 @@ if [ -z "$CLIENT_ONLY" ]; then
     # A Rust engine always comes with its overlay; without one the base file
     # would start the retired Python image, so the install stops instead.
     if [ "$COMPOSE_ENGINE" = rust ] && [ ${#engine_files[@]} -eq 0 ]; then
-        echo "The native client's engine step prepared no Rust daemon overlay, so this install would start the retired Python daemon; rerun the installer (it refreshes the native client). Nothing was started." >&2
+        echo "The engine step (ops/installer_engine.py) prepared no Rust daemon overlay, so this install would start the retired Python daemon; update this checkout to a release (git checkout v<version>) and rerun. Nothing was started." >&2
         exit 1
     fi
     if [ -n "$SWITCH_ENGINE" ]; then step "Daemon engine: ${COMPOSE_ENGINE%-checkout} for now; switching to $SWITCH_ENGINE after the install"
@@ -1717,7 +1717,7 @@ fi
 if { [ "${COMPOSE_ENGINE:-}" = rust ] || [ "${SWITCH_ENGINE:-}" = rust ]; } && [ "$TOKEN_STATE" != minted ] && [ "$TOKEN_STATE" != present ]; then
     # As at stage 4b (the bearer refusal ways).
     engine_switch_way
-    echo "The Rust daemon needs its bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun.$switch_way The daemon was not started; the Rust image and models stay downloaded for the rerun." >&2
+    echo "The Rust daemon needs its bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun.$switch_way Nothing was started; any Rust image and models already downloaded stay for the rerun." >&2
     exit 2
 fi
 # <<< engine token <<<
@@ -3878,18 +3878,18 @@ if [ -n "${SWITCH_ENGINE:-}" ]; then
     if [ -n "$switch_version" ]; then switch_args+=(--tag "$switch_version")
     else
         # Without --tag, update would move to the newest release instead.
-        echo "The installed daemon was kept: its version could not be read from http://127.0.0.1:8765/health, so the switch to $SWITCH_ENGINE did not run. Run: pseudolife-mcp update --engine $SWITCH_ENGINE --daemon-only --tag <the daemon's version>" >&2
+        echo "The installed daemon (still the retired Python daemon) was kept: its version could not be read from http://127.0.0.1:8765/health, so the switch to $SWITCH_ENGINE did not run. Run: pseudolife-mcp update --engine $SWITCH_ENGINE --daemon-only --tag <the daemon's version>" >&2
         exit 1
     fi
     ensure_shim
     if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
-        echo "The installed daemon was kept; switching it to $SWITCH_ENGINE needs the pseudolife-mcp shim, which is unavailable (see above). Run: pseudolife-mcp ${switch_args[*]}" >&2
+        echo "The installed daemon (still the retired Python daemon) was kept; switching it to $SWITCH_ENGINE needs the pseudolife-mcp shim, which is unavailable (see above). Run: pseudolife-mcp ${switch_args[*]}" >&2
         exit 1
     fi
     step "Switching the daemon to $SWITCH_ENGINE (backup, rollback tag and health gate)..."
     # Stdin closed: update's own questions take their defaults, never hang.
     if ! "$SHIM_PATH" "${switch_args[@]}" </dev/null; then
-        echo "The switch to $SWITCH_ENGINE failed; its output above says what changed and how to roll back. Retry with: $SHIM_PATH ${switch_args[*]}" >&2
+        echo "The switch to $SWITCH_ENGINE failed, so this host still runs the retired Python daemon; its output above says what changed and how to roll back. Retry with: $SHIM_PATH ${switch_args[*]}" >&2
         exit 1
     fi
 fi
