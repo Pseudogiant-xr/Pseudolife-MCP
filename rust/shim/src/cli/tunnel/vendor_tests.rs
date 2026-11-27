@@ -910,12 +910,12 @@ fn a_fifo_in_the_installed_runtime_is_refused_without_blocking() {
     broken_install_is_refused("not an owner-only regular file", |folder, _| {
         let path = folder.join("LICENSE");
         fs::remove_file(&path).unwrap();
-        rustix::fs::mknodat(
+        // mkfifoat, not mknodat: rustix has no mknodat on Apple targets, and
+        // with it this crate's lib tests did not compile on macOS.
+        rustix::fs::mkfifoat(
             rustix::fs::CWD,
             &path,
-            rustix::fs::FileType::Fifo,
             rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
-            0,
         )
         .unwrap();
     });
