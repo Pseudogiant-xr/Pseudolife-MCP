@@ -200,31 +200,65 @@ def documents_owner(folder: Path, image: str) -> None:
     folder another non-root account owns may be meant that way, and Docker
     may be unable: both are named with the sudo line instead."""
     import os
-    import uuid
     if os.name == "nt" or folder.is_symlink() or not folder.is_dir():
         return
     owner, uid, gid = owner_of(folder), os.geteuid(), os.getegid()
     if owner == uid:
         return
-    if owner == 0 and image:
-        name = f"pseudolife-documents-owner-{uuid.uuid4().hex}"
-        try:
-            ran = docker("run", "--rm", "--pull", "never", "--name", name, "--network", "none", "--read-only",
-                         "--user", "0:0", "--cap-drop", "ALL", "--cap-add", "CHOWN",
-                         "--security-opt", "no-new-privileges", "--entrypoint", "chown",
-                         "--mount", mount_spec([("type", "bind"), ("source", str(folder)), ("dst", "/documents")]),
-                         image, f"{uid}:{gid}", "/documents", timeout=120).returncode
-            if ran != 0:
-                docker("rm", "-f", name)
-        except Refusal:
-            ran = 1
-        if ran == 0 and owner_of(folder) == uid:
-            folder.chmod(0o755)
-            print(f"{folder} belonged to root (Docker created it), so you could not copy documents into it; "
-                  "it is yours again.", file=sys.stderr)
+    failed = None
+    if owner == 0:
+        failed = repair_owner(folder, image, uid, gid)
+        if failed is None:
             return
-    print(f"WARNING: {folder} belongs to another account (uid {owner}), so you cannot copy documents into it; "
-          f"run sudo chown {uid}:{gid} {folder} once.", file=sys.stderr)
+    because = f"; the automatic repair failed ({failed})" if failed else ""
+    print(f"WARNING: {folder} belongs to another account (uid {owner}), so you cannot copy documents into it"
+          f"{because}; run sudo chown {uid}:{gid} {folder} once.", file=sys.stderr)
+
+
+def repair_owner(folder: Path, image: str, uid: int, gid: int) -> str | None:
+    """The one-off container giving root's ``folder`` to ``uid:gid``; None
+    when it did (and said so), else why it did not."""
+    import uuid
+    if not image:
+        return "no daemon image is on this host"
+    # Read again just before the run: a link or a non-folder put in its place
+    # meanwhile is never handed to Docker.
+    if folder.is_symlink() or not folder.is_dir() or owner_of(folder) != 0:
+        return "the folder changed while it was being checked"
+    name = f"pseudolife-documents-owner-{uuid.uuid4().hex}"
+    code, reason = 1, ""
+    try:
+        ran = docker("run", "--rm", "--pull", "never", "--name", name, "--network", "none", "--read-only",
+                     "--user", "0:0", "--cap-drop", "ALL", "--cap-add", "CHOWN",
+                     "--security-opt", "no-new-privileges", "--entrypoint", "chown",
+                     "--mount", mount_spec([("type", "bind"), ("source", str(folder)), ("dst", "/documents")]),
+                     image, f"{uid}:{gid}", "/documents", timeout=120)
+        code = ran.returncode
+        reason = next((line.strip() for line in f"{ran.stderr or ''}\n{ran.stdout or ''}".splitlines()
+                       if line.strip()), "")[:200]
+    except Refusal as exc:
+        reason = (str(exc).splitlines() or [""])[0][:200]
+    finally:
+        # `--rm` removes a container that ran; this removes one a failure or a
+        # timeout left.
+        if code != 0:
+            try:
+                docker("rm", "-f", name)
+            except Refusal:
+                pass
+    if code != 0:
+        return reason or f"Docker exited {code}"
+    if owner_of(folder) != uid:
+        return "the container ran but the folder's owner did not change"
+    try:
+        folder.chmod(0o755)
+    except OSError as exc:
+        print(f"WARNING: {folder} is yours again, but its mode could not be set ({exc}); run chmod 755 {folder} "
+              "once.", file=sys.stderr)
+        return None
+    print(f"{folder} belonged to root (Docker created it), so you could not copy documents into it; "
+          "it is yours again.", file=sys.stderr)
+    return None
 
 
 def mount_spec(fields: list) -> str:
@@ -243,6 +277,10 @@ def documents_folder(image: str = "") -> None:
     one root owns is given back to the user (``documents_owner``)."""
     import os
     folder = Path.home() / ".pseudolife-mcp" / "documents"
+    if os.name != "nt" and os.geteuid() == 0 and os.environ.get("SUDO_UID"):
+        print(f"WARNING: this runs as root under sudo (from uid {os.environ['SUDO_UID']}), so the documents folder "
+              f"is checked for root, the account running it ({folder}); run it without sudo to set up your own "
+              "account's folder.", file=sys.stderr)
     if folder.is_dir():
         documents_owner(folder, image)
         return

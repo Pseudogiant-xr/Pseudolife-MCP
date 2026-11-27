@@ -575,11 +575,17 @@ fn documents_folder(image: &str) -> Result<()> {
     let mut run = |args: &[String]| {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         match docker(&args, true, 120) {
+            // Docker's own reason when the helper failed without output.
+            Ok(ran) if ran.code != 0 && ran.stdout.trim().is_empty() => (ran.code, ran.stderr),
             Ok(ran) => (ran.code, ran.stdout),
-            Err(_) => (1, String::new()),
+            Err(refused) => (1, refused.message),
         }
     };
-    documents_folder_in(&documents::compose_home(), &mut |folder| {
+    let home = documents::compose_home();
+    if let Some(note) = documents::sudo_note(&documents::default_folder(&home)) {
+        let _ = writeln!(io::stderr().lock(), "WARNING: {note}.");
+    }
+    documents_folder_in(&home, &mut |folder| {
         documents::fix_owner(folder, Some(image), &mut run)
     })
 }

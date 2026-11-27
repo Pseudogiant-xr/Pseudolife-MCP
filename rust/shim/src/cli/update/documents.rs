@@ -181,13 +181,26 @@ pub(crate) fn repair_args(
     .collect()
 }
 
-/// The manual fix for a folder `owner` holds instead of `uid:gid`.
-fn sudo_line(folder: &Path, owner: u32, uid: u32, gid: u32) -> String {
+/// The manual fix for a folder `owner` holds instead of `uid:gid`, naming
+/// why the automatic repair did not do it when it was tried.
+fn sudo_line(folder: &Path, owner: u32, uid: u32, gid: u32, failed: Option<&str>) -> String {
+    let failed = failed
+        .map(|why| format!("; the automatic repair failed ({why})"))
+        .unwrap_or_default();
     format!(
-        "{} belongs to another account (uid {owner}), so you cannot copy documents into it; run sudo chown {uid}:{gid} {} once",
+        "{} belongs to another account (uid {owner}), so you cannot copy documents into it{failed}; run sudo chown {uid}:{gid} {} once",
         folder.display(),
         folder.display()
     )
+}
+
+/// The first non-empty line of what Docker printed, bounded, or its exit code.
+fn docker_reason(code: i32, out: &str) -> String {
+    out.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(|l| l.chars().take(200).collect())
+        .unwrap_or_else(|| format!("Docker exited {code}"))
 }
 
 /// Give the documents folder back to this user (`uid:gid`) when another
@@ -217,29 +230,34 @@ pub(crate) fn fix_owner_with(
     if owner == uid {
         return OwnerFix::Correct;
     }
-    let manual = OwnerFix::Manual(sudo_line(folder, owner, uid, gid));
+    let failed = |why: &str| OwnerFix::Manual(sudo_line(folder, owner, uid, gid, Some(why)));
     let at_default = match (fs::canonicalize(folder), fs::canonicalize(expected)) {
         (Ok(actual), Ok(expected)) => actual == expected,
         _ => false,
     };
-    let Some(image) = image.filter(|i| !i.is_empty()) else {
-        return manual;
-    };
     if owner != 0 || !at_default {
-        return manual;
+        return OwnerFix::Manual(sudo_line(folder, owner, uid, gid, None));
+    }
+    let Some(image) = image.filter(|i| !i.is_empty()) else {
+        return failed("no daemon image is on this host");
+    };
+    // Read again just before the run: a link or a non-folder put in its
+    // place meanwhile is never handed to Docker.
+    if owner_of(folder) != Some(0) {
+        return failed("the folder changed while it was being checked");
     }
     let name = format!(
         "pseudolife-documents-owner-{}",
         uuid::Uuid::new_v4().simple()
     );
-    let (code, _) = docker(&repair_args(folder, image, uid, gid, &name));
+    let (code, out) = docker(&repair_args(folder, image, uid, gid, &name));
     if code != 0 {
         // `--rm` removes a container that ran; this removes one a timeout left.
         let _ = docker(&["rm".into(), "-f".into(), name]);
-        return manual;
+        return failed(&docker_reason(code, &out));
     }
     if owner_of(folder) != Some(uid) {
-        return manual;
+        return failed("the container ran but the folder's owner did not change");
     }
     if let Err(e) = set_mode(folder, 0o755) {
         return OwnerFix::Manual(format!(
@@ -262,6 +280,16 @@ pub(crate) fn fix_owner(
     image: Option<&str>,
     docker: &mut dyn FnMut(&[String]) -> (i32, String),
 ) -> OwnerFix {
+    fix_owner_in(folder, &compose_home(), image, docker)
+}
+
+/// [`fix_owner`] with the home directory the default folder is under.
+pub(crate) fn fix_owner_in(
+    folder: &Path,
+    home: &Path,
+    image: Option<&str>,
+    docker: &mut dyn FnMut(&[String]) -> (i32, String),
+) -> OwnerFix {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
@@ -275,20 +303,43 @@ pub(crate) fn fix_owner(
                 .filter(|m| m.is_dir())
                 .map(|m| m.uid())
         };
-        fix_owner_with(
+        fix_owner_with(folder, &default_folder(home), image, me, &owner_of, docker)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (folder, home, image, docker);
+        OwnerFix::Correct
+    }
+}
+
+/// The one-line note for an installer run as root under sudo, or `None`:
+/// the documents folder is checked for the account running it (root), not
+/// for the account sudo was run from.
+pub(crate) fn sudo_note(folder: &Path) -> Option<String> {
+    #[cfg(unix)]
+    {
+        let sudo_uid = std::env::var("SUDO_UID").ok();
+        sudo_note_for(
             folder,
-            &default_folder(&compose_home()),
-            image,
-            me,
-            &owner_of,
-            docker,
+            rustix::process::geteuid().as_raw(),
+            sudo_uid.as_deref(),
         )
     }
     #[cfg(not(unix))]
     {
-        let _ = (folder, image, docker);
-        OwnerFix::Correct
+        let _ = folder;
+        None
     }
+}
+
+pub(crate) fn sudo_note_for(folder: &Path, euid: u32, sudo_uid: Option<&str>) -> Option<String> {
+    let sudo_uid = sudo_uid.filter(|s| !s.is_empty())?;
+    (euid == 0).then(|| {
+        format!(
+            "this runs as root under sudo (from uid {sudo_uid}), so the documents folder is checked for root, the account running it ({}); run it without sudo to set up your own account's folder",
+            folder.display()
+        )
+    })
 }
 
 #[cfg(unix)]
@@ -805,5 +856,150 @@ mod tests {
         none.documents_owner_of_running();
         assert!(none.report.steps.is_empty(), "{:?}", none.report.steps);
         let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_folder_replaced_before_the_run_is_never_handed_to_docker() {
+        let home = scratch("swapped");
+        let folder = home.join("documents");
+        fs::create_dir_all(&folder).unwrap();
+        // Root's folder on the first read, a link (no folder) on the re-read
+        // just before the run.
+        let reads = std::cell::Cell::new(0);
+        let owner_of = |_: &Path| {
+            reads.set(reads.get() + 1);
+            (reads.get() == 1).then_some(0)
+        };
+        let mut runs = 0;
+        let fix = fix_owner_with(
+            &folder,
+            &folder,
+            Some("sha256:abc"),
+            (1000, 1000),
+            &owner_of,
+            &mut |_| {
+                runs += 1;
+                (0, String::new())
+            },
+        );
+        assert!(
+            matches!(fix, OwnerFix::Manual(ref l) if l.contains("changed while it was being checked")),
+            "{fix:?}"
+        );
+        assert_eq!(runs, 0);
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn the_sudo_line_names_why_docker_could_not_repair_it() {
+        let home = scratch("reason");
+        let folder = home.join("documents");
+        fs::create_dir_all(&folder).unwrap();
+        let fix = fix_owner_with(
+            &folder,
+            &folder,
+            Some("sha256:abc"),
+            (1000, 1000),
+            &|_| Some(0),
+            &mut |args| {
+                if args[0] == "run" {
+                    (125, "\ndocker: Error response from daemon: no such image\nRun 'docker run --help'".into())
+                } else {
+                    (0, String::new())
+                }
+            },
+        );
+        let OwnerFix::Manual(line) = fix else {
+            panic!("{fix:?}")
+        };
+        assert!(
+            line.contains(
+                "the automatic repair failed (docker: Error response from daemon: no such image)"
+            ),
+            "{line}"
+        );
+        assert!(line.contains("sudo chown 1000:1000"), "{line}");
+        // Silent Docker: its exit code is the reason.
+        let fix = fix_owner_with(
+            &folder,
+            &folder,
+            Some("sha256:abc"),
+            (1000, 1000),
+            &|_| Some(0),
+            &mut |_| (125, String::new()),
+        );
+        assert!(
+            matches!(fix, OwnerFix::Manual(ref l) if l.contains("(Docker exited 125)")),
+            "{fix:?}"
+        );
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    /// Whether this test process runs as root, which owns the folders the
+    /// real-owner tests rely on another account owning.
+    #[cfg(unix)]
+    fn as_root() -> bool {
+        let root = rustix::process::geteuid().is_root();
+        if root {
+            eprintln!("skipped: root owns the folders this test needs another account to own");
+        }
+        root
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_real_check_leaves_roots_folder_elsewhere_to_the_sudo_line() {
+        if as_root() {
+            return;
+        }
+        let home = scratch("real-elsewhere");
+        let mut runs = 0;
+        // `/` is root's real folder, not the default one under this home.
+        let fix = fix_owner_in(Path::new("/"), &home, Some("sha256:abc"), &mut |_| {
+            runs += 1;
+            (0, String::new())
+        });
+        assert!(
+            matches!(fix, OwnerFix::Manual(ref l) if l.contains("uid 0") && l.contains("sudo chown")),
+            "{fix:?}"
+        );
+        assert_eq!(runs, 0);
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_real_check_never_follows_a_link_at_the_default_place() {
+        if as_root() {
+            return;
+        }
+        let home = scratch("real-link");
+        let folder = default_folder(&home);
+        fs::create_dir_all(folder.parent().unwrap()).unwrap();
+        // A link where the folder goes, to a folder root owns.
+        std::os::unix::fs::symlink("/", &folder).unwrap();
+        let mut runs = 0;
+        let fix = fix_owner_in(&folder, &home, Some("sha256:abc"), &mut |_| {
+            runs += 1;
+            (0, String::new())
+        });
+        assert_eq!(fix, OwnerFix::Correct);
+        assert_eq!(runs, 0);
+        assert_eq!(fs::read_link(&folder).unwrap(), Path::new("/"));
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_run_as_root_under_sudo_is_named_once() {
+        let folder = Path::new("/root/.pseudolife-mcp/documents");
+        let note = sudo_note_for(folder, 0, Some("1000")).unwrap();
+        assert!(
+            note.contains("uid 1000") && note.contains("checked for root"),
+            "{note}"
+        );
+        // Near misses: not root, root without sudo, an empty SUDO_UID.
+        assert_eq!(sudo_note_for(folder, 1000, Some("1000")), None);
+        assert_eq!(sudo_note_for(folder, 0, None), None);
+        assert_eq!(sudo_note_for(folder, 0, Some("")), None);
     }
 }
