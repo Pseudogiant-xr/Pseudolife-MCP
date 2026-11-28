@@ -4737,7 +4737,8 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw 'source parse failed' }
-foreach ($name in @('Assert-HarnessWorktreeHasNoReparsePoint', 'Get-HarnessLongPath', 'Remove-OwnedHarnessEnvironment')) {
+foreach ($name in @('Assert-HarnessWorktreeHasNoReparsePoint', 'Get-HarnessLongPath', 'Read-HarnessProcCommandLine',
+                   'Find-HarnessProcPathUser', 'Remove-OwnedHarnessEnvironment')) {
     $definition = $ast.Find({ param($node)
         $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
     }, $true)
@@ -4831,6 +4832,76 @@ def test_harness_environment_cleanup_refuses_an_active_process(tmp_path, alias):
             assert psutil.Process(process.pid).create_time() == identity
             process.terminate()
         process.wait(timeout=15)
+
+
+_PROC_SCAN_PROBE = r'''
+param($source, $path, $root, $vanishes, $unreadable)
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw 'source parse failed' }
+$definition = $ast.Find({ param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Find-HarnessProcPathUser'
+}, $true)
+. ([scriptblock]::Create($definition.Extent.Text))
+function Read-HarnessProcCommandLine([string] $Path) {
+    $processDir = [IO.Path]::GetDirectoryName($Path)
+    $processNumber = [IO.Path]::GetFileName($processDir)
+    $gone = $processNumber -in ($vanishes -split ',')
+    if ($gone -or $processNumber -in ($unreadable -split ',')) {
+        if ($gone) { [IO.Directory]::Delete($processDir, $true) }
+        # Thrown from a .NET call, so it arrives wrapped as ReadAllBytes' does.
+        [Runtime.ExceptionServices.ExceptionDispatchInfo]::Throw([IO.IOException]::new("No such process : '$Path'", 3))
+    }
+    [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($Path))
+}
+$user = Find-HarnessProcPathUser -EnvironmentPath $path -ProcRoot $root
+"user=$user"
+'''
+
+
+def _proc_scan_probe(tmp_path, environment, processes):
+    """Run the real /proc scan over a stand-in proc root.
+
+    `processes` maps a PID to its argv text, to "vanishes" (the process exits
+    after the listing: its directory goes and the read fails with ESRCH, as
+    Linux reports it) or to "unreadable" (the read fails while it is listed).
+    """
+    root = tmp_path / "proc"
+    root.mkdir()
+    (root / "self").mkdir()
+    for pid, command in processes.items():
+        (root / str(pid)).mkdir()
+        if command not in ("vanishes", "unreadable"):
+            (root / str(pid) / "cmdline").write_bytes(command.encode() + b"\0")
+    script = tmp_path / "proc-scan-probe.ps1"
+    script.write_text(_PROC_SCAN_PROBE, encoding="utf-8")
+    pick = lambda kind: ",".join(str(pid) for pid, c in processes.items() if c == kind)  # noqa: E731
+    return subprocess.run([_PWSH, "-NoProfile", "-NonInteractive", "-File", str(script),
+                           str(ROOT / "ops/rust-harness-remote.ps1"), environment, str(root),
+                           pick("vanishes"), pick("unreadable")],
+                          capture_output=True, text=True, timeout=45)
+
+
+@needs_pwsh
+@pytest.mark.parametrize("case", ["vanished", "vanished-then-user", "user", "unreadable-while-listed"])
+def test_harness_proc_scan_treats_a_vanished_process_as_gone_and_still_refuses_a_live_user(tmp_path, case):
+    environment = f"/srv/repo.rust-harness-env-{'a' * 32}"
+    processes = {
+        "vanished": {900000001: "vanishes", 900000002: "/usr/bin/python -c pass"},
+        "vanished-then-user": {900000001: "vanishes", 900000002: f"{environment}/bin/python -m pytest"},
+        "user": {900000002: f"{environment}/bin/python -m pytest"},
+        "unreadable-while-listed": {900000003: "unreadable"},
+    }[case]
+    run = _proc_scan_probe(tmp_path, environment, processes)
+    if case == "vanished":
+        assert run.returncode == 0 and run.stdout.strip() == "user=", run.stdout + run.stderr
+    elif case == "unreadable-while-listed":
+        # Only a process whose directory is gone counts as gone.
+        assert run.returncode != 0 and "No such process" in run.stderr, run.stdout + run.stderr
+    else:
+        assert run.returncode == 0 and run.stdout.strip() == "user=900000002", run.stdout + run.stderr
 
 
 @needs_pwsh

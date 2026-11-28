@@ -210,6 +210,30 @@ public static class HarnessPathSpelling {
     [HarnessPathSpelling]::Expand($Path)
 }
 
+function Read-HarnessProcCommandLine([string] $Path) {
+    [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($Path))
+}
+
+# The PID of the first other process whose argv names the path, or nothing.
+function Find-HarnessProcPathUser {
+    param([string] $EnvironmentPath, [string] $ProcRoot = '/proc')
+    foreach ($processDir in [IO.Directory]::EnumerateDirectories($ProcRoot)) {
+        $processNumber = [IO.Path]::GetFileName($processDir)
+        if ($processNumber -notmatch '^\d+$' -or [int]$processNumber -eq $PID) { continue }
+        try { $command = Read-HarnessProcCommandLine "$processDir/cmdline" }
+        catch [IO.FileNotFoundException] { continue }
+        catch [IO.DirectoryNotFoundException] { continue }
+        catch [UnauthorizedAccessException] { continue }
+        catch [IO.IOException] {
+            # A process reaped after the listing fails its read (ESRCH); one
+            # whose directory is still listed is not known to be gone.
+            if ([IO.Directory]::Exists($processDir)) { throw }
+            continue
+        }
+        if ($command.Contains($EnvironmentPath)) { return [int]$processNumber }
+    }
+}
+
 function Remove-OwnedHarnessEnvironment {
     param([string] $EnvironmentPath, [string] $ExpectedPath, [bool] $Created,
           [string] $RunId, [string] $Repository)
@@ -239,14 +263,8 @@ function Remove-OwnedHarnessEnvironment {
         })
         if ($users.Count) { throw 'a process still uses this run''s harness environment; inspect the owned process before retrying' }
     } else {
-        foreach ($processDir in [IO.Directory]::EnumerateDirectories('/proc')) {
-            $processNumber = [IO.Path]::GetFileName($processDir)
-            if ($processNumber -notmatch '^\d+$' -or [int]$processNumber -eq $PID) { continue }
-            try { $command = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes("$processDir/cmdline")) }
-            catch [IO.FileNotFoundException] { continue }
-            catch [IO.DirectoryNotFoundException] { continue }
-            catch [UnauthorizedAccessException] { continue }
-            if ($command.Contains($EnvironmentPath)) { throw 'a process still uses this run''s harness environment; inspect it before retrying' }
+        if ($null -ne (Find-HarnessProcPathUser -EnvironmentPath $EnvironmentPath)) {
+            throw 'a process still uses this run''s harness environment; inspect it before retrying'
         }
     }
     # This exact fresh path was created under the clone lock. No link is
