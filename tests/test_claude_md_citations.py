@@ -27,7 +27,10 @@ CLAUDE_MD = ROOT / "CLAUDE.md"
 # one rule: a Codex session run by T3 Code parks as next-turn-only.
 # Raised from 4,850 on 27 November 2026 by the maintainer's ruling, to admit
 # one rule: the conductor checks for private security reports daily.
-WORD_CEILING = 4_900
+# Raised from 4,900 on 28 November 2026 to admit two maintainer-approved
+# rules: collect every failure before fixing one, and a change merged
+# without hosted CI runs every hosted job's commands on the dev machines.
+WORD_CEILING = 5_000
 
 # Files whose mentions of CLAUDE.md are history or generated copies, not citations.
 SKIP = ("CLAUDE.md", "CHANGELOG.md", "llms.txt", "llms-full.txt", "tests/test_claude_md_citations.py")

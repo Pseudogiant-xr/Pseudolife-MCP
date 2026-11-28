@@ -42,6 +42,24 @@ RUST_CHECKS = (
     "Nextest without default features",
     "Daemon override build configurations",
 )
+# A red Rust job reports its lint and test failures together (28 November
+# 2026): a Clippy or format failure no longer skips Nextest, which runs the
+# `ci` profile with fail-fast off. Each step still needs the setup, and the
+# compile check its commands depend on, to have succeeded; the job fails
+# when any of them fails, since none continues on error.
+SETUP_DONE = "steps.install_nextest.outcome == 'success'"
+COMPILED = "steps.check_all.outcome == 'success'"
+COMPILED_NO_DEFAULT = "steps.check_no_default.outcome == 'success'"
+PDFIUM = "steps.pdfium.outcome == 'success'"
+RUST_CHECK_CONDITIONS = {
+    "Check all targets": f"${{{{ !cancelled() && {SETUP_DONE} }}}}",
+    "Clippy": f"${{{{ !cancelled() && {COMPILED} }}}}",
+    "Check write-path harness targets": f"${{{{ !cancelled() && {SETUP_DONE} }}}}",
+    "Nextest": f"${{{{ !cancelled() && {COMPILED} && {PDFIUM} }}}}",
+    "Check all targets without default features": f"${{{{ !cancelled() && {SETUP_DONE} }}}}",
+    "Clippy without default features": f"${{{{ !cancelled() && {COMPILED_NO_DEFAULT} }}}}",
+    "Nextest without default features": f"${{{{ !cancelled() && {COMPILED_NO_DEFAULT} && {PDFIUM} }}}}",
+}
 # Since the Python freeze (14 November 2026) every parity check replays
 # committed goldens or runs a harness's own tests; no step binds an oracle.
 PARITY_CHECKS = {
@@ -228,6 +246,8 @@ def check_executable_coverage(jobs):
         for no_defaults in (False, True):
             label = name + (" without default features" if no_defaults else "")
             required = ("--locked", "--all-targets") + (("--no-default-features",) if no_defaults else ())
+            if name == "Nextest":
+                required += ("--profile", "ci")
             forbidden = ("--features", "--all-features") if no_defaults else ("--no-default-features",)
             require_command(commands(rust[label]["run"]), prefix, required, forbidden)
 
@@ -594,8 +614,39 @@ def test_original_checks_remain_gated_on_the_expected_shards():
                         f"matrix.suite == '{suite}'" if suite else None)
             if name in ("Daemon resident startup parity", "Daemon resident startup parity part 2"):
                 expected = "${{ !cancelled() && matrix.suite == 'cli-startup' && steps.startup_setup.outcome == 'success' }}"
-            assert actual.get("if") == expected
+            if job == "rust":
+                expected = RUST_CHECK_CONDITIONS.get(name)
+            assert actual.get("if") == expected, name
     check_executable_coverage(jobs)
+
+
+def test_a_red_rust_job_reports_every_lint_and_test_failure():
+    import tomllib
+    steps = workflow()["jobs"]["rust"]["steps"]
+    named = {step.get("name"): step for step in steps}
+    # The conditions read these steps' outcomes, so each id names its step.
+    for step_id, name in (("install_nextest", "Install pinned nextest in the runner temporary directory"),
+                          ("check_all", "Check all targets"),
+                          ("pdfium", "Provision the pinned PDFium library for the PDF tests"),
+                          ("check_no_default", "Check all targets without default features")):
+        assert [step.get("name") for step in steps if step.get("id") == step_id] == [name], step_id
+    assert "if" not in named["Install pinned nextest in the runner temporary directory"]
+    # The PDF tests need PDFium, so it is provisioned whenever Nextest can run.
+    assert named["Provision the pinned PDFium library for the PDF tests"]["if"] == f"${{{{ !cancelled() && {COMPILED} }}}}"
+    # A failing lint or test step still fails the job.
+    for name in RUST_CHECK_CONDITIONS:
+        assert not named[name].get("continue-on-error", False), name
+    # Both Nextest steps select the profile, and it reports every failure.
+    for name in ("Nextest", "Nextest without default features"):
+        words = commands(named[name]["run"])[0]
+        assert words[words.index("--profile") + 1] == "ci", name
+        assert "--fail-fast" not in words, name
+    config = tomllib.loads((ROOT / "rust/.config/nextest.toml").read_text(encoding="utf-8"))
+    profile = config["profile"]["ci"]
+    assert profile["fail-fast"] is False
+    # It inherits the default profile's slow-timeout and retries nothing.
+    assert "slow-timeout" not in profile and "slow-timeout" in config["profile"]["default"]
+    assert "retries" not in profile and "retries" not in config["profile"]["default"]
 
 
 def test_the_live_comparison_jobs_and_dispatch_modes_are_gone():
@@ -1379,6 +1430,8 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("Nextest without default features", "--no-default-features", ""),
     ("Nextest without default features", "--no-default-features", "--no-default-features --features codex-delivery"),
     ("Nextest", "cargo nextest run", "cargo --version #"),
+    ("Nextest", "--profile ci", ""),
+    ("Nextest without default features", "--profile ci", ""),
     ("Principal store golden harness", "principals.py golden", "principals.py oracle"),
     ("Principal store golden harness", "principals.py golden", "principals.py live"),
     ("Principal store golden harness", "rust/target/release", "rust/target/debug"),

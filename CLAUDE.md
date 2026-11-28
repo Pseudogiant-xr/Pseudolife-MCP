@@ -207,6 +207,11 @@ touched, with no retrofit sweep.
   overlap's tests, plus the doc guards if docs overlap.
 - A refused or interrupted run is not a pass, and a changed imported tree
   needs a fresh run except under the review-fix rule.
+- **Collect every failure before fixing one:** when a run fails, rerun the
+  failing step or slice with fail-fast off
+  (`cargo nextest run --no-fail-fast`, pytest without `-x`, every failed
+  matrix leg) on the platform that failed, and fix the whole list in one
+  round, because a fail-fast stop hides every failure behind the first.
 - **Platform-specific changes** (`os.name` / `sys.platform` branches,
   `creationflags`, `msvcrt`, `SIGBREAK`, scheduled tasks, launchd, the
   `.ps1` launchers; code resting on signals, kill, file locks, detached
@@ -336,6 +341,10 @@ touched, with no retrofit sweep.
   binaries and harness slices on the VM before CI, an unbounded Windows
   change takes the VM's native full suite, and a second or deterministic
   Windows-only CI failure goes there (next bullets).
+- **A change merged without hosted CI** (a security advisory's private
+  fork) first runs every hosted job's commands for each platform it
+  touches on the dev machines (the Windows dev VM for Windows, a Linux dev
+  box for the rest), because nothing else tests it before master.
 - **Never the live bank:** every dev machine tests against its own test
   PostgreSQL, never the live bank's server or the Windows host's bench.
 - One full suite per machine under its own lock and `full-suite@<name>`

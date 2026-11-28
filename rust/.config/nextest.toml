@@ -1,6 +1,12 @@
 [profile.default]
 slow-timeout = { period = "60s", terminate-after = 2 }
 
+# rust.yml's Rust job (`--profile ci`): the default profile's settings, and a
+# failing test no longer stops the run, so one red run lists every failing
+# test (28 November 2026: a fail-fast Windows run left 3581 of 3808 unrun).
+[profile.ci]
+fail-fast = false
+
 # rust.yml's stress loops over cargo: selections (rust/ci/stress.py). The
 # default profile's settings, no retries (a retry would turn a flake into a
 # pass), and a JUnit report listing every skipped test, which is how an
