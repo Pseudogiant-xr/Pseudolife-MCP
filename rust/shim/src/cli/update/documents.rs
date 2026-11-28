@@ -108,6 +108,8 @@ pub(crate) fn open_parent_note(_folder: &Path) -> Option<String> {
 
 /// What [`fix_owner`] did about the documents folder's owner.
 #[derive(Debug, PartialEq, Eq)]
+// Only the Unix repair (and tests) construct the non-`Correct` variants.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub(crate) enum OwnerFix {
     /// It belongs to this user (or is not a plain folder here): nothing was
     /// done and there is nothing to say.
@@ -120,6 +122,7 @@ pub(crate) enum OwnerFix {
 
 /// A `docker run --mount` value. Docker parses it as CSV, so a field holding
 /// a comma or quote is quoted, with its quotes doubled.
+#[cfg(any(unix, test))]
 fn mount_spec(fields: &[(&str, &str)]) -> String {
     fields
         .iter()
@@ -140,6 +143,7 @@ fn mount_spec(fields: &[(&str, &str)]) -> String {
 /// read-only root filesystem, mounting only the documents folder and giving
 /// that folder alone (not its contents) to `uid:gid`. Every value is its own
 /// argv word; no shell runs.
+#[cfg(any(unix, test))]
 pub(crate) fn repair_args(
     folder: &Path,
     image: &str,
@@ -183,6 +187,7 @@ pub(crate) fn repair_args(
 
 /// The manual fix for a folder `owner` holds instead of `uid:gid`, naming
 /// why the automatic repair did not do it when it was tried.
+#[cfg(any(unix, test))]
 fn sudo_line(folder: &Path, owner: u32, uid: u32, gid: u32, failed: Option<&str>) -> String {
     let failed = failed
         .map(|why| format!("; the automatic repair failed ({why})"))
@@ -195,6 +200,7 @@ fn sudo_line(folder: &Path, owner: u32, uid: u32, gid: u32, failed: Option<&str>
 }
 
 /// The first non-empty line of what Docker printed, bounded, or its exit code.
+#[cfg(any(unix, test))]
 fn docker_reason(code: i32, out: &str) -> String {
     out.lines()
         .map(str::trim)
@@ -216,6 +222,7 @@ fn docker_reason(code: i32, out: &str) -> String {
 /// owner. A folder another non-root account owns, or one at another place,
 /// may be meant that way, so it is only named with the fix, as it is when
 /// Docker or the image is unavailable.
+#[cfg(any(unix, test))]
 pub(crate) fn fix_owner_with(
     folder: &Path,
     expected: &Path,
@@ -332,6 +339,7 @@ pub(crate) fn sudo_note(folder: &Path) -> Option<String> {
     }
 }
 
+#[cfg(any(unix, test))]
 pub(crate) fn sudo_note_for(folder: &Path, euid: u32, sudo_uid: Option<&str>) -> Option<String> {
     let sudo_uid = sudo_uid.filter(|s| !s.is_empty())?;
     (euid == 0).then(|| {
@@ -348,7 +356,7 @@ fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
     fs::set_permissions(path, fs::Permissions::from_mode(mode))
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), test))]
 fn set_mode(_path: &Path, _mode: u32) -> io::Result<()> {
     Ok(())
 }
