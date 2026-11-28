@@ -142,9 +142,13 @@ pub(crate) fn text_response(
     let mut r = Response::new(Body::from(body));
     *r.status_mut() = StatusCode::from_u16(status).expect("valid status");
     let h = r.headers_mut();
+    // A static file's type can come from the platform's MIME table (the
+    // Windows registry, /etc/mime.types), so a control character there is
+    // served as an opaque type, not a panic of the request.
     h.insert(
         header::CONTENT_TYPE,
-        HeaderValue::from_str(ctype).expect("ascii"),
+        HeaderValue::from_str(ctype)
+            .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
     );
     if let Some(cache) = cache {
         h.insert(
@@ -995,6 +999,21 @@ pub fn py_strip(s: &str) -> &str {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn a_control_character_in_a_content_type_serves_an_opaque_type() {
+        let r = super::text_response(200, b"x".to_vec(), "text/markdown\u{7}", None);
+        assert_eq!(r.status(), 200);
+        assert_eq!(
+            r.headers()[super::header::CONTENT_TYPE],
+            "application/octet-stream"
+        );
+        let r = super::text_response(200, b"x".to_vec(), "text/markdown; charset=utf-8", None);
+        assert_eq!(
+            r.headers()[super::header::CONTENT_TYPE],
+            "text/markdown; charset=utf-8"
+        );
+    }
+
     #[test]
     fn shadow_get_inventory_is_explicit_and_new_routes_are_refused() {
         let routes: serde_json::Value =
