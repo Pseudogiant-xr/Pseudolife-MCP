@@ -255,7 +255,7 @@ fn unopenable_windows_tunnel_pid_does_not_hide_a_missing_bridge() {
 }
 
 #[test]
-fn macos_login_shell_comm_allows_idle_pruning_and_retains_direct_launches() {
+fn macos_login_shells_allow_idle_pruning_and_direct_launches_still_pin() {
     let f = Fixture::new();
     let old = f.install("1.0.0");
     f.install("1.0.1");
@@ -275,17 +275,66 @@ fn macos_login_shell_comm_allows_idle_pruning_and_retains_direct_launches() {
 }
 
 #[test]
-fn macos_readable_ambiguous_comm_still_blocks_pruning() {
-    for image in [
-        "pseudolife-mcp",
-        "relative/pseudolife-mcp",
-        "-zsh/unknown",
-        "-unknown",
-    ] {
-        let line = format!("123 1 {image}\n");
+fn a_macos_comm_that_is_not_an_image_path_leaves_removal_to_the_usage_lock() {
+    let f = Fixture::new();
+    let old = f.install("1.0.0");
+    f.install("1.0.1");
+    let mut evidence = f.windows_evidence();
+    // Rows a hosted macos-15 runner printed: a daemon, a driver with spaces,
+    // PATH-started tools of this account and a zombie.
+    append_macos_process_images(
+        &mut evidence.processes,
+        b"   93     1 endpointsecurityd\n  248     1 Core Audio Driver (NullAudio.driver)\n  929   927 sudo\n 1288  1281 awk\n 1292  1290 <defunct>\n 1300     1 -zsh/unknown\n 1301     1 pseudolife-mcp-helper\n",
+    )
+    .unwrap();
+    for pid in [93, 248, 929, 1288, 1292, 1300, 1301] {
         assert!(
-            append_macos_process_images(&mut vec![], line.as_bytes()).is_err(),
-            "{image}"
+            evidence
+                .processes
+                .iter()
+                .any(|p| p.0 == pid && p.2.as_os_str().is_empty()),
+            "{pid}: {:?}",
+            evidence.processes
+        );
+    }
+    let pin = launch::pin(&old).unwrap();
+    let report = f.prune(Ok(evidence.clone()));
+    assert_eq!(report["removed"], json!([]), "{report}");
+    assert_eq!(report["held"][0]["path"], json!(old.path), "{report}");
+    drop(pin);
+    assert_eq!(f.prune(Ok(evidence))["removed"], json!([old.path]));
+}
+
+#[test]
+fn a_malformed_macos_process_row_still_blocks_pruning() {
+    for line in ["", "x 1 /bin/zsh", "123 /bin/zsh", "123 y /bin/zsh"] {
+        assert!(
+            append_macos_process_images(&mut vec![], format!("{line}\n").as_bytes()).is_err(),
+            "{line:?}"
+        );
+    }
+}
+
+/// The macOS parser's runtime name is the one a unix build installs.
+#[cfg(unix)]
+#[test]
+fn the_macos_runtime_name_is_the_unix_binary() {
+    assert_eq!(MACOS_BINARY, BINARY);
+}
+
+/// A runtime that runs without its usage lock (a user's symlink to it found
+/// through PATH, another data home) shows as the runtime's bare file name, so
+/// that name, and only that name, still removes nothing.
+#[test]
+fn a_macos_process_named_like_the_runtime_without_a_path_blocks_pruning() {
+    for line in [
+        "123 1 pseudolife-mcp",
+        "123 1 relative/pseudolife-mcp",
+        "123 1 ./pseudolife-mcp",
+    ] {
+        assert!(
+            append_macos_process_images(&mut vec![], format!("{line}\n").as_bytes()).is_err(),
+            "{line:?}"
         );
     }
     let mut rows = vec![];
@@ -318,4 +367,175 @@ fn a_record_whose_name_differs_only_in_case_still_pins_its_runtime() {
     let evidence = f.windows_evidence();
     let pinned = tunnel_runtimes(&f.layout, &root, &evidence.processes).unwrap();
     assert!(pinned.contains(&old.path), "{pinned:?}");
+}
+
+/// Set by [`linux_nondumpable_child`]'s parent: run as the helper process.
+#[cfg(target_os = "linux")]
+const NONDUMPABLE_CHILD: &str = "PSEUDOLIFE_PRUNE_TEST_NONDUMPABLE_CHILD";
+
+/// The helper half of the non-dumpable tests: a same-account process that
+/// makes itself non-dumpable, as ssh-agent does, says so on stdout and waits
+/// for its parent to close stdin. A no-op in an ordinary test run.
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_nondumpable_child() {
+    if std::env::var_os(NONDUMPABLE_CHILD).is_none() {
+        return;
+    }
+    rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable).unwrap();
+    println!("{NONDUMPABLE_READY}");
+    let _ = io::Read::read(&mut io::stdin(), &mut [0u8; 1]);
+}
+
+/// What [`linux_nondumpable_child`] prints once it is non-dumpable.
+#[cfg(target_os = "linux")]
+const NONDUMPABLE_READY: &str = "pseudolife-prune-test-nondumpable-ready";
+
+/// A same-account non-dumpable process whose `exe` link refuses this account,
+/// stopped and reaped on drop.
+#[cfg(target_os = "linux")]
+struct Nondumpable(std::process::Child);
+
+#[cfg(target_os = "linux")]
+impl Nondumpable {
+    /// The helper, or `None` where this account may read a non-dumpable
+    /// process's `exe` link anyway (root, or `CAP_SYS_PTRACE`), so the case
+    /// under test cannot arise here.
+    fn spawn() -> Option<Self> {
+        use std::io::BufRead;
+        let mut child = Self(
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "runtime::prune::tests::linux_nondumpable_child",
+                    "--test-threads=1",
+                    "--nocapture",
+                ])
+                .env(NONDUMPABLE_CHILD, "1")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let stdout = child.0.stdout.take().unwrap();
+        // libtest prints the helper's `test <name> ... ` on the marker's own
+        // line, so the marker is found within a line; a reader thread keeps a
+        // helper that never prints it from hanging the test.
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let ready = io::BufReader::new(stdout)
+                .lines()
+                .map_while(std::result::Result::ok)
+                .any(|line| line.contains(NONDUMPABLE_READY));
+            let _ = ready_tx.send(ready);
+        });
+        let ready = ready_rx
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .unwrap_or(false);
+        assert!(ready, "the helper never said it became non-dumpable");
+        let exe = Path::new("/proc").join(child.pid().to_string()).join("exe");
+        match fs::read_link(&exe) {
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => Some(child),
+            other => {
+                eprintln!(
+                    "skipped: this account reads a non-dumpable process's exe link ({other:?})"
+                );
+                None
+            }
+        }
+    }
+
+    fn pid(&self) -> u32 {
+        self.0.id()
+    }
+}
+
+/// The live table as pruning reads it. A same-account process caught between
+/// exit and reaping (another test's child) briefly reads as an unreadable
+/// image, which refuses pruning by design, so a scan that hits one is
+/// retried; a refusal that persists is the answer.
+#[cfg(target_os = "linux")]
+fn live_linux_rows() -> Result<Vec<Process>> {
+    let mut last = Ok(vec![]);
+    for _ in 0..10 {
+        let mut rows = vec![];
+        last = verify_process_evidence(&mut rows).map(|()| rows);
+        if last.is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    last
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for Nondumpable {
+    fn drop(&mut self) {
+        drop(self.0.stdin.take());
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_nondumpable_linux_process_is_liveness_evidence_not_a_refusal() {
+    let Some(child) = Nondumpable::spawn() else {
+        return;
+    };
+    let rows = live_linux_rows().expect("a non-dumpable process must not stop pruning");
+    assert!(
+        rows.iter()
+            .any(|(pid, _, image)| *pid == child.pid() && image.as_os_str().is_empty()),
+        "the non-dumpable pid is kept, with no image: {rows:?}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_nondumpable_linux_process_leaves_removal_to_the_usage_lock() {
+    let f = Fixture::new();
+    let old = f.install("1.0.0");
+    let current = f.install("1.0.1");
+    let Some(_child) = Nondumpable::spawn() else {
+        return;
+    };
+    let evidence = || Evidence {
+        processes: live_linux_rows().unwrap(),
+        registrations: BTreeSet::new(),
+        tunnels: BTreeSet::new(),
+    };
+    let pin = launch::pin(&old).unwrap();
+    let report = f.prune(Ok(evidence()));
+    assert_eq!(report["removed"], json!([]), "{report}");
+    assert_eq!(report["held"][0]["path"], json!(old.path), "{report}");
+    assert!(old.path.is_dir());
+    drop(pin);
+    let report = f.prune(Ok(evidence()));
+    assert_eq!(report["removed"], json!([old.path]), "{report}");
+    assert!(current.path.is_dir());
+}
+
+/// The live table of this Mac, as `ps` prints it to this account, is
+/// evidence pruning can act on: no row of an ordinary host refuses it.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_live_macos_process_table_is_pruning_evidence() {
+    let output = std::process::Command::new("/bin/ps")
+        .args(["-axo", "pid=,ppid=,comm="])
+        .output()
+        .unwrap();
+    let mut rows = vec![];
+    let verdict = verify_process_evidence(&mut rows);
+    let refused: Vec<_> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| {
+            append_macos_process_images(&mut vec![], format!("{line}\n").as_bytes()).is_err()
+        })
+        .map(str::to_owned)
+        .collect();
+    assert!(
+        verdict.is_ok(),
+        "{verdict:?}; rows it refuses: {refused:#?}"
+    );
 }

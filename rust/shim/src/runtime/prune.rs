@@ -1,8 +1,11 @@
 use super::*;
 use std::collections::BTreeSet;
 
-/// `(pid, parent pid, image)`. An empty image records a Windows PID whose
-/// image could not be opened; it supplies tunnel liveness, never a path pin.
+/// `(pid, parent pid, image)`. An empty image records a PID whose image could
+/// not be read (a Windows process that refuses `OpenProcess`, a Linux process
+/// whose `exe` link refuses this account, a macOS process `ps` names without a
+/// path); it supplies tunnel liveness, never a path pin, and the exclusive
+/// usage lock decides removal.
 pub type Process = (u32, u32, PathBuf);
 #[derive(Clone, Debug)]
 pub struct Evidence {
@@ -52,6 +55,16 @@ fn verify_process_evidence(rows: &mut Vec<Process>) -> Result<()> {
         // the actual image as well, including native paths containing spaces.
         match fs::read_link(path.join("exe")) {
             Ok(image) => rows.push((pid, 0, image)),
+            // A same-account process that made itself non-dumpable (ssh-agent,
+            // a browser sandbox) refuses its `exe` link. Like a Windows PID
+            // that refuses `OpenProcess`, it keeps its pid for tunnel liveness
+            // and the exclusive usage lock decides: a native runtime started
+            // from its own directory locks itself before it dispatches and
+            // holds the lock until it exits, and no runtime makes itself
+            // non-dumpable.
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+                rows.push((pid, 0, PathBuf::new()));
+            }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 let stat = fs::read_to_string(path.join("stat"));
                 match stat {
@@ -153,6 +166,11 @@ fn verify_process_evidence(rows: &mut Vec<Process>) -> Result<()> {
     append_macos_process_images(rows, &output.stdout)
 }
 
+/// The runtime's file name as macOS ps prints it. The parser is compiled
+/// on every host for its tests, and on Windows [`BINARY`] carries `.exe`.
+#[cfg(any(target_os = "macos", test))]
+const MACOS_BINARY: &str = "pseudolife-mcp";
+
 #[cfg(any(target_os = "macos", test))]
 fn append_macos_process_images(rows: &mut Vec<Process>, bytes: &[u8]) -> Result<()> {
     for line in std::str::from_utf8(bytes)
@@ -173,19 +191,30 @@ fn append_macos_process_images(rows: &mut Vec<Process>, bytes: &[u8]) -> Result<
             .next()
             .and_then(|s| s.parse::<u32>().ok())
             .ok_or("invalid parent process identity")?;
-        let image = rest
-            .next()
-            .ok_or("process image is unreadable; no runtime was removed")?
-            .trim_start();
-        // ps reports login shells by their conventional argv[0], such as
-        // "-zsh", rather than an absolute image path. Recognize exact standard
-        // shell markers; arbitrary relative or truncated paths remain unknown.
-        if !image.starts_with('/')
-            && !["-sh", "-bash", "-zsh", "-ksh", "-csh", "-tcsh", "-fish"].contains(&image)
+        let image = rest.next().unwrap_or_default().trim_start();
+        // `comm` is an absolute image path only for some processes: ps prints
+        // a bare name for a process started through PATH (`awk`, `node`), a
+        // login shell's "-zsh", a system daemon or driver and a zombie's
+        // "<defunct>" (hosted macos-15, 27 November 2026). Such a row keeps
+        // its pid for tunnel liveness and the exclusive usage lock decides,
+        // since a native runtime started from its own directory locks itself
+        // before it dispatches. One that is not (a user's symlink to it found
+        // through PATH, another data home) holds no lock, and ps names it by
+        // the runtime's own file name, so that name still removes nothing.
+        let image = if image.starts_with('/') {
+            PathBuf::from(image)
+        } else if Path::new(image)
+            .file_name()
+            .is_some_and(|name| name == MACOS_BINARY)
         {
-            return Err("process image is unknown; no runtime was removed".into());
-        }
-        rows.push((pid, ppid, PathBuf::from(image)));
+            return Err(
+                "a process names the native runtime without its path; no runtime was removed"
+                    .into(),
+            );
+        } else {
+            PathBuf::new()
+        };
+        rows.push((pid, ppid, image));
     }
     Ok(())
 }
