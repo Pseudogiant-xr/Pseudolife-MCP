@@ -824,6 +824,20 @@ def credential_environment(path, daemon_url):
             os.environ["PSEUDOLIFE_MCP_DAEMON_URL"] = before_url
 
 
+def verification_credential(home, report):
+    """The token file and URL the check reads the daemon with: the
+    credential step's, or, with no Codex registration yet (a first install
+    registers the server after this step), the managed connection the hooks
+    themselves fall back to, so the check is not refused for a missing
+    bearer (hosted acceptance run 46138068421)."""
+    path, daemon_url = report.get("credential_file_path"), report.get("daemon_url")
+    if path == "":
+        recorded = _connection.read_connection(_connection.connection_path(home))
+        if recorded is not None and recorded[1]:
+            path, daemon_url = recorded[1], daemon_url or recorded[0]
+    return path, daemon_url
+
+
 def daemon_request(path, *, text=False):
     url = os.environ.get("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:8765").rstrip("/")
     headers = {}
@@ -1074,8 +1088,7 @@ def setup(args):
                         report["recovery"] = "PseudoLife hooks await approval. Rerun setup interactively or review them in Codex /hooks."
                     else:
                         with credential_environment(
-                                report.get("credential_file_path"),
-                                report.get("daemon_url")):
+                                *verification_credential(home, report)):
                             report["verified"] = verify(
                                 executable, home, cwd, config, hooks, selected)
                         report["status"] = "ready"

@@ -325,8 +325,12 @@ type Connection = (Vec<(String, Option<String>)>, String, Option<String>);
 
 /// The connection the check uses: the credential step's token file and
 /// URL over this process's environment (the hooks Codex starts inherit the
-/// same), and the bearer read from that file.
-fn connection(host: &impl Host, report: &Report) -> Result<Connection, Fail> {
+/// same), and the bearer read from that file. With no registration yet (a
+/// first install: `codex mcp add` runs after this step) the hooks find
+/// their token through the managed connection, so the check reads it there
+/// too, or it would read the daemon with no bearer and be refused (hosted
+/// acceptance run 46138068421).
+fn connection(host: &impl Host, home: &Path, report: &Report) -> Result<Connection, Fail> {
     let mut environment = Vec::new();
     let mut file = host.var(FILE_KEY).filter(|v| !v.is_empty());
     let mut literal = host.var(TOKEN_KEY).filter(|v| !v.is_empty());
@@ -335,10 +339,18 @@ fn connection(host: &impl Host, report: &Report) -> Result<Connection, Fail> {
         .get("credential_file_path")
         .and_then(Value::as_str)
     {
-        file = (!path.is_empty()).then(|| path.to_owned());
-        environment.push((FILE_KEY.to_owned(), file.clone()));
+        let configured = (!path.is_empty()).then(|| path.to_owned());
+        environment.push((FILE_KEY.to_owned(), configured.clone()));
         environment.push((TOKEN_KEY.to_owned(), None));
         literal = None;
+        file = match configured {
+            Some(path) => Some(path),
+            None => crate::setup::codex::read_connection(&crate::setup::codex::connection_path(
+                home,
+            ))?
+            .map(|(_, token_file)| token_file)
+            .filter(|token_file| !token_file.is_empty()),
+        };
     }
     let mut url = host.var(URL_KEY).filter(|v| !v.is_empty());
     if let Some(chosen) = report
@@ -572,7 +584,7 @@ async fn hook_setup<H: Host>(
         );
         return Ok(());
     }
-    let (environment, url, token) = connection(host, report)?;
+    let (environment, url, token) = connection(host, home, report)?;
     let daemon = host.daemon(url, token);
     let digest_dir = verify::digest_dir(&|key| {
         environment

@@ -536,6 +536,53 @@ def test_mailbox_approval_notice_requires_ready_hooks_and_preserves_approvals(
         assert not result.get("mailbox_approval_notice")
 
 
+@pytest.mark.parametrize("tokenless", [False, True], ids=["token", "tokenless"])
+def test_first_install_check_reads_the_daemon_with_the_hooks_credential(
+        tmp_path, monkeypatch, tokenless):
+    """Before `codex mcp add` no registration names a token file, so the
+    hooks use the managed connection, and the check must too: without it the
+    episode read had no bearer and the daemon refused it (hosted acceptance
+    run 46138068421). A tokenless managed connection sends none."""
+    home = tmp_path / "codex"
+    home.mkdir()
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    copy = home / "pseudolife" / "token"
+    copy.parent.mkdir()
+    copy.write_text("fixture-installer-bearer\n", encoding="utf-8")
+    url = "http://10.0.0.5:8765"
+    setup._private_json(home / "pseudolife" / "connection.json",
+                        setup._connection_values(url, "" if tokenless else str(copy)))
+    # What the installer exports for the step (install.sh's hook call).
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN_FILE", str(copy))
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DAEMON_URL", url)
+    selected = [hook(home, trustStatus="trusted")]
+    layer = {}
+    runtime_config = {"config": layer, "layers": [{**config(home)["layers"][0], "config": layer}]}
+    seen = {}
+
+    def verify(*args):
+        seen["file"] = os.environ.get("PSEUDOLIFE_MCP_TOKEN_FILE")
+        seen["url"] = os.environ.get("PSEUDOLIFE_MCP_DAEMON_URL")
+        return {"session_start": True}
+
+    monkeypatch.setattr(setup, "resolve_codex", lambda: "fixture-codex")
+    monkeypatch.setattr(setup, "codex", lambda *args: nullcontext(None))
+    monkeypatch.setattr(setup, "inventory", lambda *args: (runtime_config, selected))
+    monkeypatch.setattr(setup, "configure_credential_file", lambda *args: {
+        "backup": None, "credential_file_configured": False, "credential_file_path": "",
+        "daemon_url": None, "connection_configured": False})
+    monkeypatch.setattr(setup, "select_hooks", lambda *args: ("manual", selected, []))
+    monkeypatch.setattr(setup, "vet_manual", lambda *args, **kwargs: None)
+    monkeypatch.setattr(setup, "complete_set", lambda *args: True)
+    monkeypatch.setattr(setup, "verify", verify)
+    result = setup.setup(options(source="manual", trust="no", non_interactive=True))
+    assert result["status"] == "ready", result.get("recovery")
+    assert seen == {"file": None if tokenless else str(copy), "url": url}
+    # The installer's own environment is restored after the check.
+    assert os.environ["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(copy)
+
+
 @pytest.mark.parametrize("ready", [True, False])
 def test_main_prints_mailbox_notice_only_for_ready_hooks(monkeypatch, capsys, ready):
     result = {"status": "ready" if ready else "unavailable", "instructions": "skipped"}
