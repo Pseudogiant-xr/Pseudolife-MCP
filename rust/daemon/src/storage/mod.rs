@@ -265,6 +265,58 @@ pub fn parse_dsn(dsn: &str) -> Result<Config, String> {
     tls::parse(dsn)
 }
 
+/// Client-side TCP liveness for a long-lived session, so a half-open
+/// connection (its server host or a NAT gone without a reset) fails and the
+/// next use reconnects, instead of blocking every caller queued behind it
+/// until the operating system gives up (`tcp_retries2`, about 15 minutes on
+/// Linux). The driver's default is a keepalive after two hours idle.
+///
+/// What each platform applies (tokio-postgres 0.7.18 `connect_socket`): Linux
+/// all four values; macOS no `tcp_user_timeout`; Windows the idle time and
+/// interval only, with the system's probe count. Only Linux therefore caps a
+/// request already in flight; elsewhere keepalives cover an idle session.
+#[derive(Clone, Copy)]
+pub(crate) struct HalfOpen {
+    idle: Duration,
+    interval: Duration,
+    retries: u32,
+    /// Sent data the server never acknowledged.
+    unacknowledged: Duration,
+}
+
+/// For a session that reconnects freely (the board, the principal
+/// refresher): about 25-30 s. The principal refresher's values
+/// (principal_store.py `_KEEPALIVES`).
+pub(crate) const HALF_OPEN_RECONNECTS: HalfOpen = HalfOpen {
+    idle: Duration::from_secs(10),
+    interval: Duration::from_secs(5),
+    retries: 3,
+    unacknowledged: Duration::from_secs(30),
+};
+
+/// For the writer session, whose backend holds the bank's writer lease: the
+/// server-side keepalive that lease connection sets ([`LEASE_KEEPALIVE`],
+/// 60 s idle, every 10 s, three tries, about 90 s), so the client gives up
+/// no sooner than the server would free the lease. A shorter client bound
+/// would turn a network pause of half a minute into a reconnect the old,
+/// still-live backend refuses the lease, where the pause alone heals.
+pub(crate) const HALF_OPEN_LEASED: HalfOpen = HalfOpen {
+    idle: Duration::from_secs(LEASE_KEEPALIVE[0].1.unsigned_abs()),
+    interval: Duration::from_secs(LEASE_KEEPALIVE[1].1.unsigned_abs()),
+    retries: LEASE_KEEPALIVE[2].1.unsigned_abs() as u32,
+    // idle + interval * retries.
+    unacknowledged: Duration::from_secs(90),
+};
+
+pub(crate) fn detect_half_open(config: &mut Config, policy: HalfOpen) {
+    config
+        .keepalives(true)
+        .keepalives_idle(policy.idle)
+        .keepalives_interval(policy.interval)
+        .keepalives_retries(policy.retries)
+        .tcp_user_timeout(policy.unacknowledged);
+}
+
 /// `_application_name()` (postgres.py:369-380): how this process appears in
 /// `pg_stat_activity`. Python derives the program from argv; here it is the
 /// daemon's own name (free: never compared).
@@ -453,14 +505,24 @@ async fn describe_lease_holder(client: &Client) -> Result<String, tokio_postgres
     Ok(lease_holder_message(&bank, &holders))
 }
 
-/// `_connect` (postgres.py:603-624): autocommit (tokio-postgres never opens
-/// an implicit transaction), `connect_timeout` 10, the application-name
-/// fallback, then the two session settings.
-async fn connect_session(base: &Config) -> Result<(Client, JoinHandle<()>), OpenError> {
+/// The writer session's connection options: the DSN's own, the
+/// application-name fallback and [`HALF_OPEN_LEASED`] (which replaces any
+/// keepalive values the DSN gave), because every memory read and write
+/// waits on this one session.
+fn session_config(base: &Config) -> Config {
     let mut config = base.clone();
     if config.get_application_name().is_none() {
         config.application_name(application_name());
     }
+    detect_half_open(&mut config, HALF_OPEN_LEASED);
+    config
+}
+
+/// `_connect` (postgres.py:603-624): autocommit (tokio-postgres never opens
+/// an implicit transaction), `connect_timeout` 10, the application-name
+/// fallback, then the two session settings.
+async fn connect_session(base: &Config) -> Result<(Client, JoinHandle<()>), OpenError> {
+    let config = session_config(base);
     let (client, task) = connect(&config, Duration::from_secs(10))
         .await
         .map_err(OpenError::Failed)?;

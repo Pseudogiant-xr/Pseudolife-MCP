@@ -40,12 +40,7 @@ pub fn bank_fingerprint(bank_id: Option<&serde_json::Value>) -> Option<String> {
 /// on unacknowledged writes.
 fn refresher_config(dsn: &str) -> Result<storage::Config, String> {
     let mut config = storage::parse_dsn(dsn)?;
-    config
-        .keepalives(true)
-        .keepalives_idle(Duration::from_secs(10))
-        .keepalives_interval(Duration::from_secs(5))
-        .keepalives_retries(3)
-        .tcp_user_timeout(Duration::from_millis(30_000));
+    storage::detect_half_open(&mut config, storage::HALF_OPEN_RECONNECTS);
     Ok(config)
 }
 

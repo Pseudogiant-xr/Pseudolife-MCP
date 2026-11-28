@@ -1,6 +1,28 @@
 use super::*;
 
 #[test]
+fn writer_session_detects_a_half_open_connection() {
+    // Matched to the lease connection's server-side keepalive (60 s idle,
+    // every 10 s, three tries), so the client never gives up first.
+    let config = session_config(&parse_dsn("host=127.0.0.1 port=9 user=fixture").unwrap());
+    assert!(config.get_keepalives(), "writer keepalives are off");
+    assert_eq!(config.get_keepalives_idle(), Duration::from_secs(60));
+    assert_eq!(
+        config.get_keepalives_interval(),
+        Some(Duration::from_secs(10))
+    );
+    assert_eq!(config.get_keepalives_retries(), Some(3));
+    assert_eq!(
+        config.get_tcp_user_timeout(),
+        Some(&Duration::from_secs(90))
+    );
+    assert!(config.get_application_name().is_some());
+    assert_eq!(LEASE_KEEPALIVE[0], ("tcp_keepalives_idle", 60));
+    assert_eq!(LEASE_KEEPALIVE[1], ("tcp_keepalives_interval", 10));
+    assert_eq!(LEASE_KEEPALIVE[2], ("tcp_keepalives_count", 3));
+}
+
+#[test]
 fn repr_matches_python() {
     assert_eq!(py_repr("pl_bank"), "'pl_bank'");
     assert_eq!(py_repr(""), "''");
