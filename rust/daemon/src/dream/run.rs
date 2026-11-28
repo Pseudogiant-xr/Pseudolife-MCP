@@ -701,8 +701,11 @@ async fn hints(
     facts_limit: usize,
 ) -> (Vec<String>, Vec<Fact>) {
     let joined: String = texts.join(" ").chars().take(4000).collect();
+    // The batch text's embedding needs no lock; the rankings read the
+    // cortex under it.
+    let embedded = crate::fact_set::embed(ready, joined).await;
     let _ws = ready.write.lock().await;
-    match crate::fact_set::embed(ready, joined).await {
+    match embedded {
         Ok(emb) => {
             let snap = ready.cortex.snapshot();
             let vocab = vocab_ranked(&snap, &emb, VOCAB_LIMIT);
@@ -761,24 +764,49 @@ async fn resolve_dream_slot(
     if threshold <= 0.0 {
         return original;
     }
+    let text = py_strip(&format!("{entity} {attribute}")).to_string();
+    // The slot text's embedding needs no lock, so it is computed first when
+    // the slot looks unknown; the lookup is repeated under the lock, which
+    // is what decides.
+    let early = if ready.cortex.snapshot().lookup(entity, attribute).is_none() {
+        Some(embed_slot_text(ready, &text, false).await)
+    } else {
+        None
+    };
     let _ws = ready.write.lock().await;
     if ready.cortex.snapshot().lookup(entity, attribute).is_some() {
         return original;
     }
-    let text = py_strip(&format!("{entity} {attribute}")).to_string();
-    // The embedder's tokenizer refuses a lone surrogate (a TypeError in
-    // Python), which this resolver swallows.
-    if let Some(e) = super::extractor::unencodable(&[&text]) {
-        eprintln!("dream slot resolve failed ({e}); using literal slot");
-        return original;
-    }
-    match crate::fact_set::embed(ready, text).await {
+    // A slot that disappeared since the first look is embedded here.
+    let embedded = match early {
+        Some(e) => e,
+        None => embed_slot_text(ready, &text, true).await,
+    };
+    match embedded {
         Ok(emb) => resolve_slot(&ready.cortex.snapshot(), &emb, threshold).unwrap_or(original),
         Err(e) => {
-            eprintln!("dream slot resolve failed ({e:?}); using literal slot");
+            eprintln!("dream slot resolve failed ({e}); using literal slot");
             original
         }
     }
+}
+
+/// The resolver's slot embedding, or why the embedder refused the text (the
+/// caller logs it only if it would have used the embedding). `held`: the
+/// caller holds the write lock (`fact_set::embed_held`).
+async fn embed_slot_text(ready: &Arc<Ready>, text: &str, held: bool) -> Result<Arc<[f32]>, String> {
+    // The embedder's tokenizer refuses a lone surrogate (a TypeError in
+    // Python), which this resolver swallows.
+    if let Some(e) = super::extractor::unencodable(&[text]) {
+        return Err(e);
+    }
+    let text = text.to_string();
+    let embedded = if held {
+        crate::fact_set::embed_held(ready, text).await
+    } else {
+        crate::fact_set::embed(ready, text).await
+    };
+    embedded.map_err(|e| format!("{e:?}"))
 }
 
 // ---------------------------------------------------------------------------
