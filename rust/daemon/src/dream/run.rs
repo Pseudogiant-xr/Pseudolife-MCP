@@ -701,8 +701,11 @@ async fn hints(
     facts_limit: usize,
 ) -> (Vec<String>, Vec<Fact>) {
     let joined: String = texts.join(" ").chars().take(4000).collect();
+    // The batch text's embedding needs no lock; the rankings read the
+    // cortex under it.
+    let embedded = crate::fact_set::embed(ready, joined).await;
     let _ws = ready.write.lock().await;
-    match crate::fact_set::embed(ready, joined).await {
+    match embedded {
         Ok(emb) => {
             let snap = ready.cortex.snapshot();
             let vocab = vocab_ranked(&snap, &emb, VOCAB_LIMIT);
@@ -761,24 +764,49 @@ async fn resolve_dream_slot(
     if threshold <= 0.0 {
         return original;
     }
+    let text = py_strip(&format!("{entity} {attribute}")).to_string();
+    // The slot text's embedding needs no lock, so it is computed first when
+    // the slot looks unknown; the lookup is repeated under the lock, which
+    // is what decides.
+    let early = if ready.cortex.snapshot().lookup(entity, attribute).is_none() {
+        Some(embed_slot_text(ready, &text, false).await)
+    } else {
+        None
+    };
     let _ws = ready.write.lock().await;
     if ready.cortex.snapshot().lookup(entity, attribute).is_some() {
         return original;
     }
-    let text = py_strip(&format!("{entity} {attribute}")).to_string();
-    // The embedder's tokenizer refuses a lone surrogate (a TypeError in
-    // Python), which this resolver swallows.
-    if let Some(e) = super::extractor::unencodable(&[&text]) {
-        eprintln!("dream slot resolve failed ({e}); using literal slot");
-        return original;
-    }
-    match crate::fact_set::embed(ready, text).await {
+    // A slot that disappeared since the first look is embedded here.
+    let embedded = match early {
+        Some(e) => e,
+        None => embed_slot_text(ready, &text, true).await,
+    };
+    match embedded {
         Ok(emb) => resolve_slot(&ready.cortex.snapshot(), &emb, threshold).unwrap_or(original),
         Err(e) => {
-            eprintln!("dream slot resolve failed ({e:?}); using literal slot");
+            eprintln!("dream slot resolve failed ({e}); using literal slot");
             original
         }
     }
+}
+
+/// The resolver's slot embedding, or why the embedder refused the text (the
+/// caller logs it only if it would have used the embedding). `held`: the
+/// caller holds the write lock (`fact_set::embed_held`).
+async fn embed_slot_text(ready: &Arc<Ready>, text: &str, held: bool) -> Result<Arc<[f32]>, String> {
+    // The embedder's tokenizer refuses a lone surrogate (a TypeError in
+    // Python), which this resolver swallows.
+    if let Some(e) = super::extractor::unencodable(&[text]) {
+        return Err(e);
+    }
+    let text = text.to_string();
+    let embedded = if held {
+        crate::fact_set::embed_held(ready, text).await
+    } else {
+        crate::fact_set::embed(ready, text).await
+    };
+    embedded.map_err(|e| format!("{e:?}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -863,6 +891,59 @@ struct SlotRow {
     chronicle_event_id: Option<i64>,
     /// Event rows journal `attribute_norm` "event", not `norm_key`.
     attribute_norm: Option<String>,
+}
+
+/// A claim's journaled pre-image: `(prev_kind, prev)` of `SlotRow`.
+type PreImage = (
+    Option<&'static str>,
+    Option<(String, String, f64, Option<String>)>,
+);
+
+/// The rollback pre-image of a claim's slot (fields, not the record): the
+/// slot's kind, and the value, status, confidence and strongest tier of the
+/// record the claim's write replaces or confirms (`op` is `add`, `remove`
+/// or none for a scalar claim).
+fn pre_image(
+    store: &CortexStore,
+    ent: &str,
+    attr: &str,
+    op: Option<&str>,
+    value: &str,
+) -> PreImage {
+    let cur = store.lookup(ent, attr);
+    let members = store.members(ent, attr);
+    let prev_kind = if cur.is_some() {
+        Some("scalar")
+    } else if !members.is_empty() {
+        Some("set")
+    } else {
+        None
+    };
+    let prev_rec = if op.is_none() {
+        cur
+    } else {
+        let want = norm_value(value);
+        members
+            .iter()
+            .copied()
+            .find(|m| norm_value(&m.value) == want)
+            .or(if op == Some("add") { cur } else { None })
+    };
+    let prev = prev_rec.map(|r| {
+        let mut best: Option<&String> = None;
+        for s in &r.support {
+            if best.is_none_or(|b| gates::tier_rank(s) > gates::tier_rank(b)) {
+                best = Some(s);
+            }
+        }
+        (
+            r.value.clone(),
+            r.status.clone(),
+            r.confidence,
+            best.cloned(),
+        )
+    });
+    (prev_kind, prev)
 }
 
 async fn add_run_slot(ready: &Ready, run_id: i64, row: SlotRow) -> Result<(), ToolError> {
@@ -1669,47 +1750,21 @@ impl Pass<'_> {
             self.mark_carried(claim, src);
             return Ok(());
         }
-        // Pre-image capture (fields, not the record).
-        let mut prev_kind = None;
-        let mut prev = None;
-        if self.run_id.is_some() {
-            let snap = self.ready.cortex.snapshot();
-            let cur = snap.lookup(&ent, &attr);
-            let members = snap.members(&ent, &attr);
-            if cur.is_some() {
-                prev_kind = Some("scalar");
-            } else if !members.is_empty() {
-                prev_kind = Some("set");
-            }
-            let prev_rec = if op.is_none() {
-                cur
-            } else {
-                let want = norm_value(&claim.value);
-                members
-                    .iter()
-                    .copied()
-                    .find(|m| norm_value(&m.value) == want)
-                    .or(if op.as_deref() == Some("add") {
-                        cur
-                    } else {
-                        None
-                    })
-            };
-            prev = prev_rec.map(|r| {
-                let mut best: Option<&String> = None;
-                for s in &r.support {
-                    if best.is_none_or(|b| gates::tier_rank(s) > gates::tier_rank(b)) {
-                        best = Some(s);
-                    }
-                }
-                (
-                    r.value.clone(),
-                    r.status.clone(),
-                    r.confidence,
-                    best.cloned(),
-                )
-            });
-        }
+        // The pre-image is read by the writer under the write lock, just
+        // before it changes the store: read here, before the writer's
+        // embedding and lock wait, a forget or write of the slot in between
+        // journaled a state the rollback then reversed wrongly. Each writer
+        // call overwrites it, so the journal holds the state the call whose
+        // action it records found.
+        let captured: Arc<Mutex<PreImage>> = Arc::default();
+        let before_write = self.run_id.is_some().then(|| {
+            let cell = captured.clone();
+            let (ent, attr, op, value) =
+                (ent.clone(), attr.clone(), op.clone(), claim.value.clone());
+            Arc::new(move |s: &CortexStore| {
+                *cell.lock().expect("pre-image") = pre_image(s, &ent, &attr, op.as_deref(), &value);
+            }) as crate::fact_set::BeforeWrite
+        });
         let res: Value = match op.as_deref() {
             Some("add") => {
                 // `set_add` embeds "{entity} {attribute} {member}" first.
@@ -1718,6 +1773,7 @@ impl Pass<'_> {
                 a.confidence = claim.confidence;
                 a.origin = Some(origin.clone());
                 a.dream = true;
+                a.before_write = before_write.clone();
                 crate::set_members::set_add(
                     self.svc,
                     self.ready,
@@ -1731,6 +1787,7 @@ impl Pass<'_> {
                 let mut a = crate::set_members::SetRemoveArgs::new(&ent, &attr, &claim.value);
                 a.origin = Some(origin.clone());
                 a.dream = true;
+                a.before_write = before_write.clone();
                 crate::set_members::set_remove(self.svc, self.ready, a).await?
             }
             None => {
@@ -1739,7 +1796,11 @@ impl Pass<'_> {
                 } else {
                     (None, String::new(), false)
                 };
-                let args = || self.claim_args(&ent, &attr, claim, src, &origin);
+                let args = || {
+                    let mut a = self.claim_args(&ent, &attr, claim, src, &origin);
+                    a.before_write = before_write.clone();
+                    a
+                };
                 let marked = |low: bool, witness: &str| {
                     if low {
                         vec!["quarantine:low_trust".to_string(), witness.to_string()]
@@ -1753,6 +1814,7 @@ impl Pass<'_> {
                         r.support = origin.clone();
                         r.dream = true;
                         r.expect_value = Some(claim.value.clone());
+                        r.before_write = before_write.clone();
                         let rr =
                             crate::fact_resolve::cortex_resolve(self.svc, self.ready, r).await?;
                         if rr.get("resolved").and_then(Value::as_bool) == Some(true) {
@@ -1815,6 +1877,7 @@ impl Pass<'_> {
                 }
             }
         };
+        let (prev_kind, prev) = std::mem::take(&mut *captured.lock().expect("pre-image"));
         let action = res["action"].as_str().unwrap_or("").to_string();
         self.c.bump(&action);
         if !NOTHING_STORED.contains(&action.as_str()) {
@@ -2404,3 +2467,7 @@ mod tests {
 #[cfg(test)]
 #[path = "stall_tests.rs"]
 mod stall_tests;
+
+#[cfg(test)]
+#[path = "preimage_tests.rs"]
+mod preimage_tests;

@@ -552,6 +552,13 @@ impl Service {
         self.inner.lock().await
     }
 
+    /// Test seam: the embedder the next initialization uses, as tests in
+    /// other modules load the offline fixture model.
+    #[cfg(test)]
+    pub(crate) async fn use_embedder(&self, embedder: Arc<Embedder>) {
+        self.inner.lock().await.embedder = Some(embedder);
+    }
+
     pub async fn ensure_init(self: &Arc<Self>) -> Result<Arc<Ready>, String> {
         let me = self.clone();
         tokio::spawn(async move { me.init(false).await })
@@ -2049,6 +2056,104 @@ mod tests {
         );
         stop.send_replace(true);
         identity.await.unwrap();
+    }
+
+    /// A store, a fact write and a set add embed their text before taking
+    /// the write lock: with the lock held elsewhere, all four forward passes
+    /// (the fact write embeds the claim and the slot) still run, and the
+    /// writes finish once it is released.
+    #[tokio::test]
+    #[ignore = "run by startup_ci.py with PostgreSQL and the offline embedder"]
+    async fn writes_embed_before_taking_the_write_lock() {
+        use crate::mcp::dispatch::{CallIdentity, ToolCall, registry};
+
+        let dsn = identity_test_dsn();
+        let model =
+            PathBuf::from(std::env::var_os("PL_SHADOW_EMBED_FIXTURE").expect("offline embedder"));
+        let mut config = Config::default();
+        config.embedding.model_name = "pseudolife-test/write-lock-fixture".into();
+        let service = Arc::new(Service::new(
+            config,
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            model.parent().unwrap().to_owned(),
+            dsn.clone(),
+            false,
+        ));
+        service.inner.lock().await.embedder = Some(Arc::new(
+            Embedder::load_config(&service.config.embedding, Some(&model), 1).unwrap(),
+        ));
+        let principals = Arc::new(crate::auth::PrincipalStore::new());
+        let board = Arc::new(crate::board::Board::new(
+            service.config.coordination.clone(),
+            dsn,
+            service.clone(),
+            principals.clone(),
+        ));
+        service.install(&board);
+        let app = Arc::new(crate::http::App::new(
+            service.clone(),
+            crate::auth::EnvTokens::from_lookup(&|_| None),
+            principals,
+            None,
+            board,
+        ));
+        let ready = service.ensure_init().await.unwrap();
+        let held = ready.write.lock().await;
+        let before = ready.embedder.forwards().unwrap();
+        let call = |tool: &'static str, args: Value| {
+            let app = app.clone();
+            tokio::spawn(async move {
+                let ident = CallIdentity {
+                    principal: "default".into(),
+                    writer: "fixture".into(),
+                    header_session: None,
+                    transport_session: None,
+                    headers: Default::default(),
+                };
+                registry()[tool](
+                    &app,
+                    ToolCall {
+                        args: args.as_object().unwrap(),
+                        ident: &ident,
+                    },
+                )
+                .await
+            })
+        };
+        let writes = [
+            call(
+                "memory_store",
+                json!({"text": "The write lock fixture stores one entry."}),
+            ),
+            call(
+                "memory_fact_set",
+                json!({"entity": "Lock Fixture", "attribute": "owner", "value": "nobody"}),
+            ),
+            call(
+                "memory_set_add",
+                json!({"entity": "Lock Fixture", "attribute": "members", "member": "first"}),
+            ),
+        ];
+        let embedded = tokio::time::timeout(Duration::from_secs(20), async {
+            while ready.embedder.forwards().unwrap() < before + 4 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        drop(held);
+        for write in writes {
+            write.await.unwrap().unwrap();
+        }
+        embedded.expect("a write waited for the write lock before embedding its text");
+        // A lock holder's embedding never queues on the write embedding gate.
+        let _gate = crate::fact_set::admit_write_embed().await;
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            crate::fact_set::embed_held(&ready, "A lock holder's text.".into()),
+        )
+        .await
+        .expect("embed_held waited for the write embedding gate")
+        .unwrap();
     }
 
     #[tokio::test]

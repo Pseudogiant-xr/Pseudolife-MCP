@@ -75,11 +75,18 @@ impl LabelArg {
     }
 }
 
+/// A look at the cortex that a fact writer (`cortex_write`, `set_add`,
+/// `set_remove`, `cortex_resolve`) runs under the write lock, immediately
+/// before it changes the store, so nothing else can change the slot in
+/// between: the dream journals its rollback pre-image this way.
+pub(crate) type BeforeWrite = Arc<dyn Fn(&crate::stores::cortex::CortexStore) + Send + Sync>;
+
 /// The arguments of `service.cortex_write` (`service.py:3916-3933`) but
 /// `now`, which no caller passes: `memory_fact_set` binds its MCP
 /// arguments (`Self::bind`); the dream's claim writes pass `support`,
-/// `stance`, both labels, `dream=True` and, to park, `provenance` and
-/// `force_contend` (`service_dream.py:2106-2208`).
+/// `stance`, both labels, `dream=True`, their pre-image capture
+/// (`before_write`) and, to park, `provenance` and `force_contend`
+/// (`service_dream.py:2106-2208`).
 pub(crate) struct CortexWriteArgs {
     pub entity: String,
     pub attribute: String,
@@ -96,6 +103,7 @@ pub(crate) struct CortexWriteArgs {
     pub authority: LabelArg,
     pub distortion_tolerance: LabelArg,
     pub dream: bool,
+    pub before_write: Option<BeforeWrite>,
 }
 
 impl CortexWriteArgs {
@@ -118,6 +126,7 @@ impl CortexWriteArgs {
             authority: LabelArg::auto(),
             distortion_tolerance: LabelArg::auto(),
             dream: false,
+            before_write: None,
         }
     }
 
@@ -187,8 +196,43 @@ async fn entity_kind(
         .and_then(|m| m.get(&norm_key(entity)).cloned()))
 }
 
+/// Admits one write-side embedding at a time to the blocking pool. The
+/// embedder runs one forward pass at a time anyway (its own mutex); without
+/// this gate a burst of writes, which no longer queue on the write lock
+/// before embedding, would each park a blocking-pool thread on that mutex,
+/// and a search ranking under the write lock needs a free one.
+static WRITE_EMBEDS: std::sync::LazyLock<tokio::sync::Semaphore> =
+    std::sync::LazyLock::new(|| tokio::sync::Semaphore::new(1));
+
+/// A permit from [`WRITE_EMBEDS`], held across one write-side embedding.
+pub(crate) async fn admit_write_embed() -> tokio::sync::SemaphorePermit<'static> {
+    WRITE_EMBEDS
+        .acquire()
+        .await
+        .expect("the write embedding gate is never closed")
+}
+
+/// A write-side embedding computed before the write lock, through the gate.
 pub(crate) async fn embed(ready: &Ready, text: String) -> Result<Arc<[f32]>, ToolError> {
-    let embedder = ready.embedder.clone();
+    let _admitted = admit_write_embed().await;
+    embed_now(ready.embedder.clone(), text).await
+}
+
+/// A write-side embedding for a caller that already holds the write lock
+/// (auto-promotion, a world fact's write, a curation snapshot restore, the
+/// dream's slot resolution when the slot vanished since its first look). It
+/// skips the gate: the gate admits waiting writers first come, first served,
+/// so a lock holder queued there would keep the lock through every queued
+/// writer's forward pass. Only one task holds the lock, so this parks at
+/// most one more blocking-pool thread on the model.
+pub(crate) async fn embed_held(ready: &Ready, text: String) -> Result<Arc<[f32]>, ToolError> {
+    embed_now(ready.embedder.clone(), text).await
+}
+
+async fn embed_now(
+    embedder: Arc<crate::embed::Embedder>,
+    text: String,
+) -> Result<Arc<[f32]>, ToolError> {
     let row = tokio::task::spawn_blocking(move || embedder.embed(&text))
         .await
         .map_err(internal_cause)?
@@ -196,9 +240,10 @@ pub(crate) async fn embed(ready: &Ready, text: String) -> Result<Arc<[f32]>, Too
     Ok(Arc::from(row))
 }
 
-/// `service.cortex_write` (`service.py:3916-4040`), under the write lock
-/// (the Python service lock) from the freshness lookup to the answer: the
-/// label resolution before it, then the class, both embeddings, the writer
+/// `service.cortex_write` (`service.py:3916-4040`): the label resolution and
+/// both embeddings (which depend on the arguments alone) before the write
+/// lock, then under it (the Python service lock) from the freshness lookup
+/// to the answer: the class, the writer
 /// and episode stamps, an HLC tick, the store write, the entity mint, the
 /// per-slot save and, for a direct user supersede (never a dream write),
 /// the correction signal. A set-valued slot answers `ToolError::Invalid`
@@ -219,14 +264,9 @@ pub(crate) async fn cortex_write(
         .distortion_tolerance
         .resolve(&a.value, crate::labels::resolve_distortion)
         .map_err(ToolError::Invalid)?;
-    let db = ready.storage.client();
-    let mut ws = ready.write.lock().await;
-    let freshness_class = if a.freshness_class == "auto" {
-        let kind = entity_kind(&mut ws, db, &a.entity).await?;
-        crate::freshness::resolve_class(kind.as_deref(), &norm_key(&a.attribute)).to_string()
-    } else {
-        a.freshness_class.clone()
-    };
+    // Both embeddings depend on the arguments alone, so they are computed
+    // before the write lock: searches and other writes no longer wait out
+    // two forward passes behind it.
     let display = |key: &str, fallback: &str| {
         a.raw
             .get(key)
@@ -240,6 +280,14 @@ pub(crate) async fn cortex_write(
     let embedding = embed(ready, claim).await?;
     let slot_text = py_strip(&format!("{entity_text} {attribute_text}")).to_string();
     let slot_embedding = embed(ready, slot_text).await?;
+    let db = ready.storage.client();
+    let mut ws = ready.write.lock().await;
+    let freshness_class = if a.freshness_class == "auto" {
+        let kind = entity_kind(&mut ws, db, &a.entity).await?;
+        crate::freshness::resolve_class(kind.as_deref(), &norm_key(&a.attribute)).to_string()
+    } else {
+        a.freshness_class.clone()
+    };
     let mut session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
     let resolved = ws.resolve_handle(db, a.episode.as_deref()).await;
     let warning = (a.episode.as_deref().is_some_and(|e| !e.is_empty()) && resolved.is_none())
@@ -274,7 +322,12 @@ pub(crate) async fn cortex_write(
     };
     let outcome = ready
         .cortex
-        .write(|s| s.write_fact(&w))
+        .write(|s| {
+            if let Some(look) = &a.before_write {
+                look(s);
+            }
+            s.write_fact(&w)
+        })
         .map_err(|_| ToolError::Invalid(SET_SLOT_REFUSAL.into()))?;
     if !crate::mutants::active("mcp-fact-set-no-entity-mint") {
         ensure_subject_entity(db, &a.entity)

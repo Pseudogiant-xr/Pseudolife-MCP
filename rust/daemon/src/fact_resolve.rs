@@ -8,7 +8,7 @@ use std::sync::Arc;
 use serde_json::{Map, Value, json};
 
 use crate::episodes;
-use crate::fact_set::{internal, save_cortex};
+use crate::fact_set::{BeforeWrite, internal, save_cortex};
 use crate::mcp::dispatch::{ToolCall, ToolError, ToolFn, ToolFuture};
 use crate::read::cortex_search::record_to_dict;
 use crate::service::{Ready, Service};
@@ -32,6 +32,7 @@ pub(crate) struct ResolveArgs {
     pub support: String,
     pub dream: bool,
     pub expect_value: Option<String>,
+    pub before_write: Option<BeforeWrite>,
 }
 
 impl ResolveArgs {
@@ -45,6 +46,7 @@ impl ResolveArgs {
             support: RESOLVE_SUPPORT.into(),
             dream: false,
             expect_value: None,
+            before_write: None,
         }
     }
 
@@ -98,6 +100,9 @@ pub(crate) async fn cortex_resolve(
     let hlc = a.accept.then(|| ready.tick_hlc());
     let now = episodes::now();
     let res = ready.cortex.write(|s| {
+        if let Some(look) = &a.before_write {
+            look(s);
+        }
         s.resolve(
             &a.entity,
             &a.attribute,

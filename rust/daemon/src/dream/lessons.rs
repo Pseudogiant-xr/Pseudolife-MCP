@@ -495,23 +495,29 @@ pub async fn synthesize_lessons(
     let plain_refs: Vec<&Signal> = plain.iter().collect();
     let dedup_thr = m.lessons_synthesis_dedup_min_similarity;
 
+    // Claim embeddings depend on the claims alone, so they are made before
+    // the write lock (pure CPU, no SQL); a failure still fails the batch
+    // below, after the lessons refresh, before its transaction opens.
+    let embedded: Result<Vec<_>, ToolError> = async {
+        let mut embeddings = Vec::with_capacity(claims.len());
+        for c in &claims {
+            let text = crate::lesson_write::embed_text(&c.task, &c.aspect, &c.lesson);
+            // The tokenizer refuses a reply's lone surrogate (a TypeError).
+            if let Some(e) = super::extractor::embed_refused(&[&text]) {
+                return Err(internal(e));
+            }
+            embeddings.push(crate::fact_set::embed(ready, text).await?);
+        }
+        Ok(embeddings)
+    }
+    .await;
     let ws = ready.write.lock().await;
     crate::forget_tools::ensure_lessons_refreshed(ready)
         .await
         .map_err(internal)?;
     let mut batch = Batch::default();
     let result: Result<(), ToolError> = async {
-        // Claim embeddings before the transaction (pure CPU, no SQL).
-        let mut embeddings = Vec::with_capacity(claims.len());
-        for c in &claims {
-            let text = crate::lesson_write::embed_text(&c.task, &c.aspect, &c.lesson);
-            // The tokenizer refuses a reply's lone surrogate (a TypeError),
-            // failing the batch before its transaction opens.
-            if let Some(e) = super::extractor::embed_refused(&[&text]) {
-                return Err(internal(e));
-            }
-            embeddings.push(crate::fact_set::embed(ready, text).await?);
-        }
+        let embeddings = embedded?;
         let ws_ref = &*ws;
         let mut staged: LessonStore = (*ready.lessons.snapshot()).clone();
         let handled_status: Vec<i64> = plain_handled.iter().chain(&rule_handled).copied().collect();
