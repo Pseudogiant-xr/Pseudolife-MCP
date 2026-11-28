@@ -18,6 +18,10 @@ pub const LADDER: [Tier; 3] = [Tier::Minimal, Tier::Core, Tier::Full];
 
 /// Overrides are working-day-scoped (`SESSION_TTL_S`).
 pub const OVERRIDE_TTL: Duration = Duration::from_secs(12 * 3600);
+/// At most this many overrides are kept; past it the oldest goes first.
+/// Not measured: an entry is a short key and a timestamp, so the cap only
+/// bounds memory against keys that change on every request.
+pub const OVERRIDE_CAP: usize = 10_000;
 
 impl Tier {
     pub fn parse(s: &str) -> Option<Tier> {
@@ -96,15 +100,38 @@ fn norm_keep_case(s: &str) -> &str {
 /// lowercased writer-id namespace; an empty key is the shared bucket.
 pub struct Overrides {
     ttl: Duration,
+    cap: usize,
     map: Mutex<HashMap<String, (Tier, Instant)>>,
+}
+
+/// Expired overrides go once the map is large, then the oldest past `cap`.
+fn bound(map: &mut HashMap<String, (Tier, Instant)>, now: Instant, ttl: Duration, cap: usize) {
+    if map.len() > 256 {
+        map.retain(|_, (_, ts)| now.duration_since(*ts) <= ttl);
+    }
+    while map.len() > cap {
+        let Some(oldest) = map
+            .iter()
+            .min_by_key(|(_, (_, ts))| *ts)
+            .map(|(key, _)| key.clone())
+        else {
+            break;
+        };
+        map.remove(&oldest);
+    }
 }
 
 const GLOBAL: &str = "__global__";
 
 impl Overrides {
     pub fn new(ttl: Duration) -> Self {
+        Self::with_cap(ttl, OVERRIDE_CAP)
+    }
+
+    fn with_cap(ttl: Duration, cap: usize) -> Self {
         Self {
             ttl,
+            cap,
             map: Mutex::new(HashMap::new()),
         }
     }
@@ -145,9 +172,7 @@ impl Overrides {
         let next = step(current);
         if next != current {
             map.insert(k, (next, now));
-            if map.len() > 256 {
-                map.retain(|_, (_, ts)| now.duration_since(*ts) <= self.ttl);
-            }
+            bound(&mut map, now, self.ttl, self.cap);
         }
         (current, next)
     }
@@ -158,11 +183,7 @@ impl Overrides {
         let now = Instant::now();
         let mut map = self.map.lock().expect("tier overrides lock");
         map.insert(k, (tier, now));
-        if map.len() > 256 {
-            // Opportunistic sweep keeps the map bounded.
-            let ttl = self.ttl;
-            map.retain(|_, (_, ts)| now.duration_since(*ts) <= ttl);
-        }
+        bound(&mut map, now, self.ttl, self.cap);
     }
 }
 
@@ -190,6 +211,26 @@ pub fn resolve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn past_the_cap_the_oldest_override_goes() {
+        let o = Overrides::with_cap(OVERRIDE_TTL, 3);
+        let now = Instant::now();
+        for (key, seconds) in [("a", 30), ("b", 20), ("c", 10)] {
+            o.set(Some(key), Tier::Full);
+            o.map.lock().unwrap().get_mut(key).unwrap().1 = now - Duration::from_secs(seconds);
+        }
+        o.set(Some("d"), Tier::Full);
+        assert_eq!(o.map.lock().unwrap().len(), 3);
+        assert_eq!(o.get(Some("a")), None);
+        for key in ["b", "c", "d"] {
+            assert_eq!(o.get(Some(key)), Some(Tier::Full), "{key}");
+        }
+        // A transition that changes a tier is bounded the same way.
+        o.transition(Some("e"), Tier::Core, |_| Tier::Minimal);
+        assert_eq!(o.map.lock().unwrap().len(), 3);
+        assert_eq!(o.get(Some("b")), None);
+    }
 
     #[test]
     fn map_parsing_matches_python() {

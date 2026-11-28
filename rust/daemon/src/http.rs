@@ -422,7 +422,7 @@ pub(crate) struct RequestBody {
 }
 
 impl RequestBody {
-    fn new(inner: Body) -> Self {
+    pub(crate) fn new(inner: Body) -> Self {
         Self {
             inner,
             received: 0,

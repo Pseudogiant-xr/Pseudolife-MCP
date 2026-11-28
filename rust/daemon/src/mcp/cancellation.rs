@@ -83,6 +83,15 @@ impl Registry {
         }
     }
 
+    /// The sessions with a request in flight.
+    pub(super) fn sessions(&self) -> std::collections::HashSet<String> {
+        let requests = self.0.lock().expect("request lock");
+        requests
+            .keys()
+            .map(|(session, _)| session.clone())
+            .collect()
+    }
+
     pub(super) fn forget(&self, sid: &str) {
         self.0
             .lock()
