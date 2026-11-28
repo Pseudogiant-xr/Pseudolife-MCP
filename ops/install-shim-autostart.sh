@@ -66,9 +66,37 @@ done
 [ -n "$MODEL" ] || MODEL="claude-opus-5-5"
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
+# The installed native client registers the shim itself, with no Python
+# involved, as the installers use it. With neither --native nor --python it
+# is the runner only where no Python is on PATH: a host that has Python keeps
+# the Python runner, since switching a registered runner is the user's
+# choice, and is told the command that switches it.
+native_launcher="${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}"
+native_found=""
+if [ -f "$native_launcher" ] && [ -x "$native_launcher" ] &&
+    answer="$("$native_launcher" update --native-capability 2>/dev/null)" &&
+    [ "${answer%$'\r'}" = "pseudolife-mcp native-update-v1" ]; then
+    native_found=1
+fi
+host_python="$(command -v python3 || command -v python || true)"
+if [ -z "$NATIVE_EXE" ] && [ -z "$PYTHON_EXE" ] && [ -n "$native_found" ]; then
+    if [ -z "$host_python" ]; then
+        NATIVE_EXE="$native_launcher"
+        echo "No Python on PATH; registering through the installed native client $native_launcher."
+    else
+        printf 'To register through the installed native client instead (no Python needed): %q --native %q\n' "$0" "$native_launcher"
+    fi
+fi
 command -v systemctl >/dev/null 2>&1 || {
     echo "systemctl not found — run the shim manually instead:" >&2
-    echo "  python $repo/evals/claude_shim.py --port $PORT --model $MODEL --system-prompt-file $repo/$PROMPT_FILE" >&2
+    if [ -n "$NATIVE_EXE" ]; then
+        printf -v manual_shim '%q ' "$NATIVE_EXE" extractor-shim claude --repo "$repo" --port "$PORT" --model "$MODEL" --prompt-file "$repo/$PROMPT_FILE"
+        echo "  ${manual_shim% }" >&2
+    elif [ -n "$host_python" ]; then
+        echo "  python $repo/evals/claude_shim.py --port $PORT --model $MODEL --system-prompt-file $repo/$PROMPT_FILE" >&2
+    else
+        echo "  (no Python on PATH and no native client: install the native client with ops/install.sh, then run pseudolife-mcp extractor-shim claude --repo <this checkout>)" >&2
+    fi
     exit 1
 }
 
@@ -85,9 +113,12 @@ claude_cli="$(command -v claude || true)"
 # Native registration is shipped in the executable; no Python is discovered.
 if [ -n "$NATIVE_EXE" ]; then
     NATIVE_EXE="$(command -v "$NATIVE_EXE")"
-    bridge_ip="$(ip -4 addr show docker0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1)"
+    bridge_ip="$( { ip -4 addr show docker0 2>/dev/null || true; } | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1)"
     native_args=(extractor-shim install-autostart claude --repo "$repo" --native-exe "$NATIVE_EXE"
-        --model "$MODEL" --port "$PORT" --host "${bridge_ip:-172.17.0.1}" --log "$LOG_FILE")
+        --model "$MODEL" --port "$PORT" --log "$LOG_FILE")
+    # The docker bridge, where the daemon container reaches the shim; without
+    # one the native client binds its loopback default.
+    [ -z "$bridge_ip" ] || native_args+=(--host "$bridge_ip")
     [ -z "$NATIVE_UNIT" ] || native_args+=(--name "$NATIVE_UNIT")
     native_args+=(--prompt-file "$prompt_path" --cli "$claude_cli")
     exec "$NATIVE_EXE" "${native_args[@]}"
@@ -103,8 +134,15 @@ fi
 # way the unit will use it, and says which and why; --python names one to
 # verify instead. Last among the checks: a missing CLI fails faster than a
 # venv build.
-helper_python="$(command -v python3 || command -v python || true)"
-[ -n "$helper_python" ] || { echo "no python3 on PATH to run ops/shim_python.py, which picks the shim's interpreter; install Python 3.10+ and re-run." >&2; exit 1; }
+helper_python="$host_python"
+if [ -z "$helper_python" ]; then
+    if [ -n "$PYTHON_EXE" ]; then
+        echo "no python3 on PATH to run ops/shim_python.py, which checks the --python interpreter; put one on PATH, or drop --python to register through the native client." >&2
+    else
+        echo "no python3 on PATH and no native client answered at $native_launcher: install the native client with ops/install.sh, or pass --native <its path>, then re-run." >&2
+    fi
+    exit 1
+fi
 picker=("$helper_python" "$repo/ops/shim_python.py" --repo "$repo")
 [ -z "$PYTHON_EXE" ] || picker+=(--python "$PYTHON_EXE")
 PYTHON_EXE="$("${picker[@]}")" || { echo "shim autostart not registered: no interpreter for the unit (see above)." >&2; exit 1; }
@@ -114,7 +152,7 @@ PYTHON_EXE="$("${picker[@]}")" || { echo "shim autostart not registered: no inte
 # 127.0.0.1 bind is invisible to the daemon container. Bind the bridge IP —
 # not 0.0.0.0, which would expose the unauthenticated shim to the LAN. From
 # the host, verify with: curl http://$BIND_HOST:$PORT/health
-bridge_ip="$(ip -4 addr show docker0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1)"
+bridge_ip="$( { ip -4 addr show docker0 2>/dev/null || true; } | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1)"
 BIND_HOST="${bridge_ip:-172.17.0.1}"
 
 mkdir -p "$(dirname "$LOG_FILE")"

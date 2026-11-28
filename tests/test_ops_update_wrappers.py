@@ -109,7 +109,8 @@ def test_update_sh_rejects_an_unknown_flag_before_running_anything(tmp_path):
 # `--clients-only` is a release-mode option of `pseudolife-mcp update`; the
 # wrappers deploy a checkout, so they name the command that updates the
 # clients alone instead of failing on an unknown argument (2026-09-29).
-_CLIENTS_REDIRECT = "for the clients alone: python ops/update_clients.py"
+_CLIENTS_REDIRECT = ("for the clients alone: python ops/update_clients.py installs this checkout's clients; "
+                     "pseudolife-mcp update --clients-only installs the newest release's")
 
 
 @pytest.mark.skipif(PWSH is None, reason="pwsh not available")

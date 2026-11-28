@@ -511,6 +511,7 @@ frozen test_session_title.py
 live test_shared_embedding_weights.py
 live test_shim.py
 live test_shim_autostart.py
+live test_shim_autostart_native_default.py
 live test_shim_autostart_refs.py
 frozen test_shim_board_retry.py
 frozen test_shim_channel.py

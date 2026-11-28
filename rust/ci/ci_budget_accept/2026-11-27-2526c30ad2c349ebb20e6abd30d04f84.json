@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "a26edffa51ea3249",
+  "fingerprint": "adc8ff728d7fb3f0",
+  "reason": "adds tests/test_shim_autostart_native_default.py: on Windows only its 6 pwsh cases run (the bash ones skip), each one pwsh start against a stub launcher; the whole file took 9.5 s on the first Linux dev box (27 Nov 2026)"
+}
