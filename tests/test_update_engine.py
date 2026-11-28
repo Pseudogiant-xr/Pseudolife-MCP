@@ -454,9 +454,12 @@ def test_overlay_preserves_persistent_data_and_separates_shadow():
     ComposeLoader.add_constructor("!reset", lambda loader, node: None)
     release = yaml.load((root / "ops/docker-compose.rust-ghcr.yml").read_text(encoding="utf-8"), Loader=ComposeLoader)
     assert daemon["environment"]["PSEUDOLIFE_DAEMON_MODELS_DIR"] == "/models"
-    assert daemon["volumes"] == ["pseudolife_rust_models:/models"]
-    assert daemon["environment"]["PSEUDOLIFE_DAEMON_MODELS_DIR"] == \
-        release["services"][up.DAEMON_SERVICE]["environment"]["PSEUDOLIFE_DAEMON_MODELS_DIR"]
+    # The documents folder document_ingest reads from, read-only, named as
+    # its root, in both overlays.
+    assert daemon["volumes"] == ["pseudolife_rust_models:/models",
+                                 "~/.pseudolife-mcp/documents:/documents:ro"]
+    assert daemon["environment"]["PSEUDOLIFE_DAEMON_DOCUMENT_ROOTS"] == "/documents"
+    assert daemon["environment"] == release["services"][up.DAEMON_SERVICE]["environment"]
     assert daemon["volumes"] == release["services"][up.DAEMON_SERVICE]["volumes"]
     assert active["volumes"] == {"pseudolife_rust_models": {}} == release["volumes"]
     shadow = yaml.safe_load((root / "ops/docker-compose.rust-shadow.yml").read_text(encoding="utf-8"))

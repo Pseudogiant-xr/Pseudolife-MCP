@@ -1171,6 +1171,9 @@ impl Update {
         if self.o.clients_only {
             self.refuse_checkout_shadow(&target)?;
             self.refuse_tunnel_move(None)?;
+            // The client steps of a first upgrade by an updater older than the
+            // documents folder run here, after that updater's daemon step.
+            self.documents_owner_of_running();
             self.clients(None, &format!("pseudolife-mcp=={target}"), before.as_ref());
             return Ok(());
         }
@@ -1296,6 +1299,11 @@ impl Update {
             )?,
             None => config.clone(),
         };
+        if choice == "rust"
+            && let Some(conflict) = documents::mount_conflict(&config, &context.running)
+        {
+            return Err(UpdateError::usage(conflict));
+        }
         engine::verify_bank_identity(self, &identity, &context.running)?;
         if self.o.allow_auth_change {
             self.step("using the explicitly requested daemon bearer settings from --env-file");
@@ -2658,6 +2666,11 @@ impl Update {
     /// at startup (a non-default reranker, an embedding model it cannot
     /// load): the Python daemon keeps serving.
     fn check_config(&mut self, image: &str, config: &Value, strict: bool) -> Result<()> {
+        // The documents folder the release overlay binds read-only, before
+        // the first thing that mounts it (this check mounts every bind;
+        // Compose would otherwise create a missing one owned by root). Every
+        // Rust path checks first: the ordinary update and both import stages.
+        self.documents_folder(config, image)?;
         self.step(format!(
             "checking this bank's configuration against {image}..."
         ));

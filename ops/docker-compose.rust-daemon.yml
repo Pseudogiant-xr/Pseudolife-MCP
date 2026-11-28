@@ -13,7 +13,11 @@ services:
     # and update provisions it before its backup.
     environment:
       PSEUDOLIFE_DAEMON_MODELS_DIR: /models
+      # document_ingest reads only from its documents directories (below).
+      PSEUDOLIFE_DAEMON_DOCUMENT_ROOTS: /documents
     volumes:
       - pseudolife_rust_models:/models
+      # The documents folder, read-only; install and update create it.
+      - ~/.pseudolife-mcp/documents:/documents:ro
 volumes:
   pseudolife_rust_models: {}

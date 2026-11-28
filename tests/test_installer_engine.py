@@ -4,6 +4,7 @@ import os
 import sys
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -20,6 +21,10 @@ def helper(tmp_path, monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path / "data"))
+    # prepare creates the documents folder under the home directory.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
     state = {"labels": None, "calls": [], "fail": None}
 
     def docker(*args, capture=True, timeout=60):
@@ -94,6 +99,232 @@ def test_fresh_rust_install_pulls_provisions_then_records_only_after_health(help
     assert module.detect() == "rust"
     # update verifies the same record the installer wrote.
     assert eng._validated_engine_selection(state["labels"])["image"].endswith("-rust:0.23.0")
+
+
+def test_a_rust_install_creates_the_documents_folder_once_and_mounts_it(helper, tmp_path, capsys):
+    module, state, repo = helper
+    folder = tmp_path / "home" / ".pseudolife-mcp" / "documents"
+    [overlay] = module.prepare(repo, "rust")
+    assert folder.is_dir()
+    if os.name != "nt":
+        assert folder.stat().st_mode & 0o777 == 0o755
+        assert folder.parent.stat().st_mode & 0o777 == 0o700
+    assert f"Created the documents folder {folder}" in capsys.readouterr().err
+    text = overlay.read_text(encoding="utf-8")
+    assert '      - "~/.pseudolife-mcp/documents:/documents:ro"' in text
+    assert '      PSEUDOLIFE_DAEMON_DOCUMENT_ROOTS: "/documents"' in text
+    # A rerun (the accepted selection, as on a set-up host) changes nothing
+    # and says nothing about the folder.
+    (folder / "kept.md").write_text("kept", encoding="utf-8")
+    _started(module, state)
+    module.accept()
+    assert module.prepare(repo, "rust") == [overlay]
+    assert "documents folder" not in capsys.readouterr().err
+    assert (folder / "kept.md").read_text(encoding="utf-8") == "kept"
+    # An accepted host whose folder is gone gets it back on a rerun.
+    (folder / "kept.md").unlink()
+    folder.rmdir()
+    assert module.prepare(repo, "rust") == [overlay]
+    assert folder.is_dir()
+    # The Python engine gets no overlay.
+    assert module.prepare(repo, "python") == []
+
+
+def _root_owned_folder(module, state, tmp_path, monkeypatch, repaired=True):
+    """The documents folder as Docker leaves a bind source it created: root
+    owns it until the fake Docker's chown helper runs (and, with
+    ``repaired``, works)."""
+    folder = tmp_path / "home" / ".pseudolife-mcp" / "documents"
+    folder.mkdir(parents=True)
+    folder.chmod(0o700)
+    owner = {"uid": 0}
+    monkeypatch.setattr(module, "owner_of", lambda path: owner["uid"])
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(os, "getegid", lambda: 1000)
+    wrapped = module.docker
+
+    def docker(*args, capture=True, timeout=60):
+        if args[:1] == ("run",) and "chown" in args and state.get("helper_code", 0) == 0 and repaired:
+            owner["uid"] = 1000
+        result = wrapped(*args, capture=capture, timeout=timeout)
+        if args[:1] == ("run",) and "chown" in args:
+            return subprocess.CompletedProcess(args, state.get("helper_code", 0), "", state.get("helper_err", ""))
+        return result
+
+    monkeypatch.setattr(module, "docker", docker)
+    return folder, owner
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Docker Desktop creates the folder as the user")
+def test_a_documents_folder_root_owns_is_given_back_through_a_one_off_container(helper, tmp_path, monkeypatch,
+                                                                                  capsys):
+    module, state, repo = helper
+    folder, owner = _root_owned_folder(module, state, tmp_path, monkeypatch)
+    module.prepare(repo, "rust")
+    helpers = [c for c in state["calls"] if c[:1] == ["run"] and "chown" in c]
+    assert len(helpers) == 1, state["calls"]
+    args = helpers[0]
+    # Never pulled, no network, a read-only root, uid 0 with CHOWN alone,
+    # only this folder mounted, its owner alone changed.
+    for pair in (["--pull", "never"], ["--network", "none"], ["--user", "0:0"], ["--cap-drop", "ALL"],
+                 ["--cap-add", "CHOWN"], ["--entrypoint", "chown"]):
+        assert any(args[i:i + 2] == pair for i in range(len(args))), (pair, args)
+    assert "--read-only" in args and args.count("--mount") == 1
+    assert args[args.index("--mount") + 1] == f"type=bind,source={folder},dst=/documents"
+    assert args[-3:] == [f"{eng.RUST_IMAGE}:0.23.0", "1000:1000", "/documents"]
+    assert owner["uid"] == 1000 and folder.stat().st_mode & 0o777 == 0o755
+    assert "it is yours again" in capsys.readouterr().err
+    # A rerun on the repaired folder does nothing and says nothing.
+    state["calls"].clear()
+    module.prepare(repo, "rust")
+    assert not [c for c in state["calls"] if "chown" in c]
+    assert "documents" not in capsys.readouterr().err
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Docker Desktop creates the folder as the user")
+def test_without_docker_a_documents_folder_root_owns_gets_the_sudo_line(helper, tmp_path, monkeypatch, capsys):
+    module, state, repo = helper
+    folder, owner = _root_owned_folder(module, state, tmp_path, monkeypatch)
+    state["helper_code"] = 125
+    state["helper_err"] = "\ndocker: Error response from daemon: no such image\nRun 'docker run --help'"
+    module.prepare(repo, "rust")
+    err = capsys.readouterr().err
+    # Docker's own reason, then the fix.
+    assert ("the automatic repair failed (docker: Error response from daemon: no such image); "
+            f"run sudo chown 1000:1000 {folder} once") in err
+    assert owner["uid"] == 0 and folder.stat().st_mode & 0o777 == 0o700
+    assert any(c[:2] == ["rm", "-f"] for c in state["calls"])
+    # Docker unreachable or timed out (the engine's docker raises): the same
+    # line with that reason, and the leftover still removed by name.
+    wrapped = module.docker
+    removed = []
+
+    def unreachable(*args, **kwargs):
+        if args[:1] == ("run",) and "chown" in args:
+            raise module.Refusal("Cannot reach Docker; start Docker and rerun the installer.")
+        if args[:2] == ("rm", "-f"):
+            removed.append(args[2])
+            raise module.Refusal("Cannot reach Docker")
+        return wrapped(*args, **kwargs)
+
+    monkeypatch.setattr(module, "docker", unreachable)
+    module.documents_folder("img")
+    err = capsys.readouterr().err
+    assert "the automatic repair failed (Cannot reach Docker; start Docker and rerun the installer.)" in err
+    assert "run sudo chown 1000:1000" in err and "Traceback" not in err
+    assert len(removed) == 1 and removed[0].startswith("pseudolife-documents-owner-")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Docker Desktop creates the folder as the user")
+def test_a_mode_that_cannot_be_set_after_the_repair_names_its_chmod(helper, tmp_path, monkeypatch, capsys):
+    module, state, repo = helper
+    folder, owner = _root_owned_folder(module, state, tmp_path, monkeypatch)
+    real = Path.chmod
+
+    def chmod(path, mode, **kwargs):
+        if path == folder:
+            raise PermissionError(1, "Operation not permitted")
+        return real(path, mode, **kwargs)
+
+    monkeypatch.setattr(Path, "chmod", chmod)
+    module.prepare(repo, "rust")
+    err = capsys.readouterr().err
+    assert "is yours again, but its mode could not be set" in err and f"run chmod 755 {folder} once" in err
+    assert owner["uid"] == 1000
+
+
+@pytest.mark.skipif(os.name == "nt", reason="no owner check on Windows")
+def test_a_documents_link_is_never_repaired_or_named(helper, tmp_path, monkeypatch, capsys):
+    module, state, repo = helper
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    folder = tmp_path / "home" / ".pseudolife-mcp" / "documents"
+    folder.parent.mkdir(parents=True)
+    folder.symlink_to(target, target_is_directory=True)
+    monkeypatch.setattr(module, "owner_of", lambda path: 0)
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    module.prepare(repo, "rust")
+    assert not [c for c in state["calls"] if "chown" in c]
+    assert "documents" not in capsys.readouterr().err
+    assert folder.is_symlink()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="no owner check on Windows")
+def test_a_folder_that_changes_before_the_run_is_never_handed_to_docker(helper, tmp_path, monkeypatch, capsys):
+    module, state, repo = helper
+    folder, owner = _root_owned_folder(module, state, tmp_path, monkeypatch)
+    reads = []
+
+    def owner_of(path):
+        reads.append(path)
+        # Root's on the first read, another owner on the re-read before the run.
+        return 0 if len(reads) == 1 else 1001
+
+    monkeypatch.setattr(module, "owner_of", owner_of)
+    module.prepare(repo, "rust")
+    assert not [c for c in state["calls"] if "chown" in c]
+    assert "changed while it was being checked" in capsys.readouterr().err
+
+
+@pytest.mark.skipif(os.name == "nt", reason="no sudo on Windows")
+def test_a_run_as_root_under_sudo_says_whose_folder_it_checks(helper, monkeypatch, capsys):
+    module, state, repo = helper
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.setenv("SUDO_UID", "1000")
+    module.prepare(repo, "rust")
+    err = capsys.readouterr().err
+    assert err.count("this runs as root under sudo (from uid 1000)") == 1, err
+    # Near miss: root without sudo says nothing about it.
+    monkeypatch.delenv("SUDO_UID")
+    module.prepare(repo, "rust")
+    assert "under sudo" not in capsys.readouterr().err
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Docker Desktop creates the folder as the user")
+def test_a_helper_that_leaves_the_owner_unchanged_gets_the_sudo_line(helper, tmp_path, monkeypatch, capsys):
+    module, state, repo = helper
+    # The helper exits 0 but the owner stays root (a remapped user namespace):
+    # only the re-read owner counts.
+    folder, owner = _root_owned_folder(module, state, tmp_path, monkeypatch, repaired=False)
+    module.prepare(repo, "rust")
+    assert [c for c in state["calls"] if c[:1] == ["run"] and "chown" in c]
+    assert f"run sudo chown 1000:1000 {folder} once" in capsys.readouterr().err
+    assert folder.stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.skipif(os.name == "nt", reason="no owner check on Windows")
+def test_a_documents_folder_another_account_owns_is_named_not_repaired(helper, tmp_path, monkeypatch, capsys):
+    module, state, repo = helper
+    folder = tmp_path / "home" / ".pseudolife-mcp" / "documents"
+    folder.mkdir(parents=True)
+    # A non-root account's folder may be meant that way: named, never chowned.
+    monkeypatch.setattr(os, "geteuid", lambda: folder.stat().st_uid + 1)
+    module.prepare(repo, "rust")
+    err = capsys.readouterr().err
+    assert "belongs to another account" in err and "automatic repair" not in err
+    assert not [c for c in state["calls"] if "chown" in c]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="no owner check on Windows")
+def test_a_documents_folder_the_user_owns_is_left_alone_on_a_rerun(helper, tmp_path, capsys):
+    module, state, repo = helper
+    folder = tmp_path / "home" / ".pseudolife-mcp" / "documents"
+    folder.mkdir(parents=True)
+    folder.chmod(0o750)
+    module.prepare(repo, "rust")
+    assert not [c for c in state["calls"] if "chown" in c]
+    assert folder.stat().st_mode & 0o777 == 0o750
+    assert "documents" not in capsys.readouterr().err
+
+
+def test_a_file_where_the_documents_folder_goes_refuses_the_install(helper, tmp_path):
+    module, state, repo = helper
+    folder = tmp_path / "home" / ".pseudolife-mcp" / "documents"
+    folder.parent.mkdir(parents=True)
+    folder.write_text("not a folder", encoding="utf-8")
+    with pytest.raises(module.Refusal, match="exists but is not a folder"):
+        module.prepare(repo, "rust")
+    assert folder.read_text(encoding="utf-8") == "not a folder"
 
 
 def test_accept_waits_for_a_ready_daemon_at_its_release(helper):

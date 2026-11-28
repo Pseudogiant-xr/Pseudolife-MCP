@@ -326,7 +326,7 @@ fn bind_source(source: &str) -> String {
     // Preserve POSIX case and backslashes: they can name distinct files.
     source.to_owned()
 }
-fn same_bind_source(actual: &str, expected: &str) -> bool {
+pub(super) fn same_bind_source(actual: &str, expected: &str) -> bool {
     let windows = |s: &str| {
         s.starts_with(r"\\")
             || s.starts_with("/run/desktop/mnt/host/")
@@ -1283,6 +1283,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
             if choice == "rust" {
                 // The config the replacement runs with: its model directory and volume.
                 let replacement = compose_config(u, &compose, &env, UNRESOLVED)?;
+                u.documents_folder(&replacement, &image)?;
                 u.provision_models(&image, &replacement)?;
             }
             // A state volume the daemon account cannot use is archived first
