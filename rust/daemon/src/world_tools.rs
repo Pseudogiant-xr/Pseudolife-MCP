@@ -144,9 +144,10 @@ fn mcp_memory_world_set<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> To
     })
 }
 
-/// `service.world_write` under the write lock: the embedding of
-/// `f"{entity} {attribute} {value}".strip()`, the writer and session, one
-/// HLC tick, the store write, then the slot save.
+/// `service.world_write`: the embedding of
+/// `f"{entity} {attribute} {value}".strip()`, which depends on the
+/// arguments alone, before the write lock, then under it the writer and
+/// session, one HLC tick, the store write and the slot save.
 async fn world_write(
     svc: &Service,
     ready: &Arc<Ready>,
@@ -154,7 +155,6 @@ async fn world_write(
     writer: String,
     a: SetArgs,
 ) -> Result<Value, ToolError> {
-    let ws = ready.write.lock().await;
     let args = WorldWriteArgs {
         entity: &a.entity,
         attribute: &a.attribute,
@@ -167,7 +167,9 @@ async fn world_write(
         content_hash: a.content_hash.as_deref(),
         source_doc_id: None,
     };
-    let (action, idx) = write_locked(svc, ready, &ws, caller, &writer, &args).await?;
+    let embedding = embed_write(ready, &args, false).await?;
+    let ws = ready.write.lock().await;
+    let (action, idx) = write_locked(svc, ready, &ws, caller, &writer, &args, embedding).await?;
     let snap = ready.world.snapshot();
     let policy = &svc.config.memory.search.stale_policy;
     let mut out = Map::new();
@@ -196,9 +198,26 @@ pub(crate) struct WorldWriteArgs<'a> {
     pub source_doc_id: Option<i64>,
 }
 
-/// The body of `service.world_write` with the write lock held: the
-/// embedding, the writer's session, one HLC tick, the store write and the
-/// slot save. Returns the action and the answered record's index.
+/// The embedding `service.world_write` stores with the fact, of
+/// `f"{entity} {attribute} {value}".strip()`. `held`: the caller already
+/// holds the write lock (`fact_set::embed_held`).
+pub(crate) async fn embed_write(
+    ready: &Ready,
+    a: &WorldWriteArgs<'_>,
+    held: bool,
+) -> Result<Arc<[f32]>, ToolError> {
+    let text = py_strip(&format!("{} {} {}", a.entity, a.attribute, a.value)).to_string();
+    if held {
+        crate::fact_set::embed_held(ready, text).await
+    } else {
+        embed(ready, text).await
+    }
+}
+
+/// The body of `service.world_write` with the write lock held, given the
+/// fact's embedding (`embed_write`): the writer's session, one HLC tick,
+/// the store write and the slot save. Returns the action and the answered
+/// record's index.
 pub(crate) async fn write_locked(
     svc: &Service,
     ready: &Ready,
@@ -206,9 +225,8 @@ pub(crate) async fn write_locked(
     caller: &Caller,
     writer: &str,
     a: &WorldWriteArgs<'_>,
+    embedding: Arc<[f32]>,
 ) -> Result<(&'static str, usize), ToolError> {
-    let text = format!("{} {} {}", a.entity, a.attribute, a.value);
-    let embedding = embed(ready, py_strip(&text).to_string()).await?;
     let session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
     let hlc = ready.tick_hlc();
     let now = crate::episodes::now();

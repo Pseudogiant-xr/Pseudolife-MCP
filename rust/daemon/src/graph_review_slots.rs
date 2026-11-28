@@ -1052,7 +1052,11 @@ async fn world_from_snapshots(
             content_hash: content_hash.as_deref(),
             source_doc_id,
         };
-        crate::world_tools::write_locked(svc, ready, w.ws, w.caller, w.writer, &args).await?;
+        // The snapshot is read under the restore's lock, so its embedding is
+        // computed there too.
+        let embedding = crate::world_tools::embed_write(ready, &args, true).await?;
+        crate::world_tools::write_locked(svc, ready, w.ws, w.caller, w.writer, &args, embedding)
+            .await?;
         restored.push(d);
     }
     let now = crate::episodes::now();

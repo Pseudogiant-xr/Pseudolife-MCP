@@ -198,9 +198,10 @@ fn mcp_memory_set_remove<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> T
     })
 }
 
-/// `service.set_add` (`service.py:4042-4098`), under the write lock from
-/// the embedding to the answer: the embedding, the writer stamps, an HLC
-/// tick, the store add, the entity mint and the per-slot save. Answers the
+/// `service.set_add` (`service.py:4042-4098`): the embedding (from the
+/// arguments alone) before the write lock, then under it to the answer: the
+/// writer stamps, an HLC tick, the store add, the entity mint and the
+/// per-slot save. Answers the
 /// service dict (no note; the MCP tool adds it).
 pub(crate) async fn set_add(
     svc: &Service,
@@ -216,11 +217,12 @@ pub(crate) async fn set_add(
     {
         return Err(ToolError::Invalid(refusal));
     }
-    let db = ready.storage.client();
-    let ws = ready.write.lock().await;
-    // Embedded even for a blank member, as Python does.
+    // Embedded even for a blank member, as Python does; from the arguments
+    // alone, so before the write lock.
     let claim = py_strip(&format!("{} {} {}", a.entity, a.attribute, a.member)).to_string();
     let embedding = embed(ready, claim).await?;
+    let db = ready.storage.client();
+    let ws = ready.write.lock().await;
     let session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
     // Ticked before the write, so an invalid or capped add still advances
     // the clock.

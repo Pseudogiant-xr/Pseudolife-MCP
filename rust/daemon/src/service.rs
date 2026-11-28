@@ -2051,6 +2051,137 @@ mod tests {
         identity.await.unwrap();
     }
 
+    /// A store (with its auto-promoted slot), a fact write, a set add, a
+    /// world fact, a supersede and a consolidation embed their text before
+    /// taking the write lock: with the lock held elsewhere, all eight forward
+    /// passes (the fact write embeds the claim and the slot) still run, and
+    /// the writes finish once it is released.
+    #[tokio::test]
+    #[ignore = "run by startup_ci.py with PostgreSQL and the offline embedder"]
+    async fn writes_embed_before_taking_the_write_lock() {
+        use crate::mcp::dispatch::{CallIdentity, ToolCall, registry};
+
+        let dsn = identity_test_dsn();
+        let model =
+            PathBuf::from(std::env::var_os("PL_SHADOW_EMBED_FIXTURE").expect("offline embedder"));
+        let mut config = Config::default();
+        config.embedding.model_name = "pseudolife-test/write-lock-fixture".into();
+        // The store's derived slot is promoted too (one more pass).
+        config.memory.cortex_auto_promote = true;
+        let service = Arc::new(Service::new(
+            config,
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            model.parent().unwrap().to_owned(),
+            dsn.clone(),
+            false,
+        ));
+        service.inner.lock().await.embedder = Some(Arc::new(
+            Embedder::load_config(&service.config.embedding, Some(&model), 1).unwrap(),
+        ));
+        let principals = Arc::new(crate::auth::PrincipalStore::new());
+        let board = Arc::new(crate::board::Board::new(
+            service.config.coordination.clone(),
+            dsn,
+            service.clone(),
+            principals.clone(),
+        ));
+        service.install(&board);
+        let app = Arc::new(crate::http::App::new(
+            service.clone(),
+            crate::auth::EnvTokens::from_lookup(&|_| None),
+            principals,
+            None,
+            board,
+        ));
+        let ready = service.ensure_init().await.unwrap();
+        let held = ready.write.lock().await;
+        let before = ready.embedder.forwards().unwrap();
+        let call = |tool: &'static str, args: Value| {
+            let app = app.clone();
+            tokio::spawn(async move {
+                let ident = CallIdentity {
+                    principal: "default".into(),
+                    writer: "fixture".into(),
+                    header_session: None,
+                    transport_session: None,
+                    headers: Default::default(),
+                };
+                registry()[tool](
+                    &app,
+                    ToolCall {
+                        args: args.as_object().unwrap(),
+                        ident: &ident,
+                    },
+                )
+                .await
+            })
+        };
+        // A correction's argument error answers before its embedding, so
+        // without a forward pass and without waiting for the lock.
+        let refused = tokio::time::timeout(
+            Duration::from_secs(10),
+            call(
+                "memory_supersede",
+                json!({"new_text": "A replacement nobody selected."}),
+            ),
+        )
+        .await
+        .expect("a correction with no selector waited for the write lock")
+        .unwrap()
+        .unwrap();
+        assert_eq!(refused["reason"], "invalid_selector");
+        assert_eq!(ready.embedder.forwards().unwrap(), before);
+        let writes = [
+            call("memory_store", json!({"text": "I have a cat named Jacque"})),
+            call(
+                "memory_fact_set",
+                json!({"entity": "Lock Fixture", "attribute": "owner", "value": "nobody"}),
+            ),
+            call(
+                "memory_set_add",
+                json!({"entity": "Lock Fixture", "attribute": "members", "member": "first"}),
+            ),
+            call(
+                "memory_world_set",
+                json!({"entity": "Lock Fixture", "attribute": "site", "value": "example",
+                       "source_url": "https://example.com/fixture", "source_quote": "example"}),
+            ),
+            // The replacement is embedded before its targets are looked up,
+            // so a missing target still costs its pass.
+            call(
+                "memory_supersede",
+                json!({"old_text": "No entry has this text.", "new_text": "A replacement."}),
+            ),
+            call(
+                "memory_consolidate",
+                json!({"replaces": ["No entry has this text either."],
+                       "new_text": "A consolidation."}),
+            ),
+        ];
+        // store 2 (entry, promoted slot), fact_set 2, set_add, world_set,
+        // supersede and consolidate 1 each.
+        let embedded = tokio::time::timeout(Duration::from_secs(20), async {
+            while ready.embedder.forwards().unwrap() < before + 8 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        drop(held);
+        for write in writes {
+            write.await.unwrap().unwrap();
+        }
+        embedded.expect("a write waited for the write lock before embedding its text");
+        // A lock holder's embedding never queues on the write embedding gate.
+        let _gate = crate::fact_set::admit_write_embed().await;
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            crate::fact_set::embed_held(&ready, "A lock holder's text.".into()),
+        )
+        .await
+        .expect("embed_held waited for the write embedding gate")
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn compaction_keeps_one_policy_when_a_patch_arrives_during_initialization() {
         let dir = std::env::temp_dir().join(format!("pl-sweep-config-{}", std::process::id()));

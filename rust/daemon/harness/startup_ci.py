@@ -45,6 +45,9 @@ BANK_IDENTITY_CHECKS = (
     "service::tests::board_contexts_publish_one_identity_to_health",
     "service::tests::memory_tools_work_while_bank_identity_is_blocked",
     "service::tests::bank_identity_retry_wakes_on_storage_republish",
+    # Not an identity check, but the same fixture: a disposable bank and the
+    # offline embedder through a whole Service.
+    "service::tests::writes_embed_before_taking_the_write_lock",
 )
 
 
