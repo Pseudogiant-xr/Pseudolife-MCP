@@ -341,10 +341,6 @@ touched, with no retrofit sweep.
   binaries and harness slices on the VM before CI, an unbounded Windows
   change takes the VM's native full suite, and a second or deterministic
   Windows-only CI failure goes there (next bullets).
-- **A change merged without hosted CI** (a security advisory's private
-  fork) first runs every hosted job's commands for each platform it
-  touches on the dev machines (the Windows dev VM for Windows, a Linux dev
-  box for the rest), because nothing else tests it before master.
 - **Never the live bank:** every dev machine tests against its own test
   PostgreSQL, never the live bank's server or the Windows host's bench.
 - One full suite per machine under its own lock and `full-suite@<name>`
@@ -358,6 +354,10 @@ touched, with no retrofit sweep.
   "Sharing" says: a reproduction gets a fix PR, a confirmed flake a deflake
   PR, and an unreproduced failure a deflake PR or an issue naming the
   hosted run once it recurs.
+- **A change merged without hosted CI** (a security advisory's private
+  fork) first runs every hosted job's commands for each platform it
+  touches on the dev machines (the Windows dev VM for Windows, a Linux dev
+  box for the rest), because nothing else tests it before master.
 - **A PR that adds a `windows-latest` test resting on real process
   spawn/wait/kill, sockets or named pipes, file locks or atomic replace, or
   timeouts (a harness `run.py` scenario included; a test that only mocks

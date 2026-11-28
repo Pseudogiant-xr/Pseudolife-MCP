@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "c5485972763d0a43",
+  "fingerprint": "c2ba4fef78310097",
+  "reason": "Green runs execute the same steps and commands as before: the change adds step ids and !cancelled() conditions so the compile checks, Clippy, the harness-target check, the PDFium provision and both Nextest steps still run after an earlier lint or compile failure, and passes --profile ci (fail-fast off, otherwise the default profile) to both Nextest steps. Measured minutes are medians of successful jobs, which are unchanged. A red run usually costs about a green run, since the override builds (about 12-16 min on hosted Windows) are still skipped after any failure; a red run where many tests hang to the 120 s slow-timeout now runs every one of them instead of stopping at the first, and is capped by the job's existing 75/101 and 100/127 minute timeouts. No job, shard or slot is added."
+}

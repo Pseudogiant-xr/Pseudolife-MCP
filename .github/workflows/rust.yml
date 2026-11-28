@@ -422,13 +422,14 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           $nextestRoot | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-      # One red run reports every lint and test failure (28 November 2026):
-      # on master a Windows Clippy failure skipped Nextest, and Nextest's
-      # fail-fast stop then hid most of its tests, so each fix round found
-      # only the next failure. From here each check and test step runs when
-      # the setup above, and the compile check its commands need, succeeded,
-      # whatever an earlier lint said; none continues on error, so the job
-      # still fails when any of them does. Nextest runs the `ci` profile
+      # One red run reports every Rust lint and Nextest failure (28 November
+      # 2026): on master a Windows Clippy failure skipped Nextest, and
+      # Nextest's fail-fast stop then hid most of its tests, so each fix
+      # round found only the next failure. From here each check and test
+      # step runs when every step above (the Python checks included)
+      # succeeded, and so did the compile check its commands need, whatever
+      # an earlier lint said; none continues on error, so the job still
+      # fails when any of them does. Nextest runs the `ci` profile
       # (rust/.config/nextest.toml), which does not fail fast. The goldens
       # replay, the DLL import check and the override builds keep the
       # default and are skipped after any failure.
@@ -448,7 +449,10 @@ jobs:
         run: cargo check --locked --all-targets -p pseudolife-daemon --features harness,mutants -j 4
       - name: Provision the pinned PDFium library for the PDF tests
         id: pdfium
-        if: ${{ !cancelled() && steps.check_all.outcome == 'success' }}
+        # It builds only pseudolife-daemon, so a default-feature compile
+        # failure elsewhere still leaves the no-default Nextest pass its
+        # PDF tests.
+        if: ${{ !cancelled() && steps.install_nextest.outcome == 'success' }}
         # The PDF text tests require it and fail without it: one
         # pin-checked download (about 4 MB) through the daemon's own
         # provisioner, into a root every later step sees. The dev binary

@@ -631,8 +631,12 @@ def test_a_red_rust_job_reports_every_lint_and_test_failure():
                           ("check_no_default", "Check all targets without default features")):
         assert [step.get("name") for step in steps if step.get("id") == step_id] == [name], step_id
     assert "if" not in named["Install pinned nextest in the runner temporary directory"]
-    # The PDF tests need PDFium, so it is provisioned whenever Nextest can run.
-    assert named["Provision the pinned PDFium library for the PDF tests"]["if"] == f"${{{{ !cancelled() && {COMPILED} }}}}"
+    # The PDF tests need PDFium, and it builds only the daemon, so it is
+    # provisioned after setup whichever feature set's compile check failed.
+    assert named["Provision the pinned PDFium library for the PDF tests"]["if"] == f"${{{{ !cancelled() && {SETUP_DONE} }}}}"
+    # It reads the binary Nextest built, so it still runs only when every
+    # step before it succeeded.
+    assert named["Check Windows client DLL imports"]["if"] == "runner.os == 'Windows'"
     # A failing lint or test step still fails the job.
     for name in RUST_CHECK_CONDITIONS:
         assert not named[name].get("continue-on-error", False), name
