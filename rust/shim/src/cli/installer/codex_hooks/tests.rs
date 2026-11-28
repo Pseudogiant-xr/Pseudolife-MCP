@@ -1656,7 +1656,74 @@ async fn the_managed_bearer_goes_only_to_the_managed_daemon() {
         recovery.contains("http://10.0.0.6:8765") && recovery.contains("mismatch"),
         "{recovery}"
     );
+    assert!(
+        recovery.contains("-DaemonUrl") && recovery.contains("set it to http://10.0.0.5:8765"),
+        "{recovery}"
+    );
     assert_eq!(*world.host.connected.borrow(), None);
+}
+
+#[tokio::test]
+async fn an_exported_url_that_differs_only_by_a_trailing_slash_agrees() {
+    // The near miss of the mismatch refusal: the same daemon written with a
+    // trailing slash is no mismatch, and the managed bearer goes to it.
+    let mut world = World::new();
+    without_registration(&world);
+    credential_step_before_registration(&mut world, None);
+    world.host.env.insert(
+        "PSEUDOLIFE_MCP_DAEMON_URL".into(),
+        "http://10.0.0.5:8765/".into(),
+    );
+    let report = world.run("manual", "yes", "auto").await;
+    assert_eq!(report.status, "ready", "{:?}", report.recovery);
+    let connected = world.host.connected.borrow().clone();
+    let (url, token) = connected.expect("the check reads the daemon");
+    assert_eq!(url.trim_end_matches('/'), "http://10.0.0.5:8765");
+    assert_eq!(token.as_deref(), Some("fixture-installer-bearer"));
+}
+
+#[tokio::test]
+async fn a_tokenless_managed_connection_names_the_daemon_whatever_is_exported() {
+    // The hooks ignore an exported URL when the managed connection records
+    // no token file, so the check reads the managed daemon, with no bearer,
+    // instead of refusing a mismatch.
+    let mut world = World::new();
+    without_registration(&world);
+    credential_step_before_registration(&mut world, Some(""));
+    world.host.env.insert(
+        "PSEUDOLIFE_MCP_DAEMON_URL".into(),
+        "http://10.0.0.6:8765".into(),
+    );
+    let report = world.run("manual", "yes", "auto").await;
+    assert_eq!(report.status, "ready", "{:?}", report.recovery);
+    assert_eq!(
+        *world.host.connected.borrow(),
+        Some(("http://10.0.0.5:8765".to_owned(), None))
+    );
+}
+
+#[tokio::test]
+async fn a_managed_connection_without_a_url_lends_the_check_no_bearer() {
+    // The hooks treat a managed connection that names no URL as a
+    // connection error and use none of it, so its token file never goes to
+    // the exported (or default) daemon.
+    let mut world = World::new();
+    without_registration(&world);
+    credential_step_before_registration(&mut world, None);
+    let copy = crate::setup::codex::token_copy_path(&world.home);
+    let connection = crate::setup::codex::connection_path(&world.home);
+    fs::remove_file(&connection).unwrap();
+    crate::board::state::atomic_create(
+        &connection,
+        &crate::setup::codex::connection_bytes("", &copy.to_string_lossy()),
+    )
+    .unwrap();
+    world.run("manual", "yes", "auto").await;
+    assert_eq!(
+        *world.host.connected.borrow(),
+        Some(("http://10.0.0.5:8765".to_owned(), None)),
+        "the managed token must not go to a daemon the connection does not name"
+    );
 }
 
 #[tokio::test]

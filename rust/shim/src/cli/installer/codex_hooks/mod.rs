@@ -349,9 +349,12 @@ fn connection(host: &impl Host, home: &Path, report: &Report) -> Result<Connecti
         file = match configured {
             Some(path) => Some(path),
             None => {
+                // One that names no URL is a connection error to the
+                // hooks, so its token file is not used.
                 let recorded = crate::setup::codex::read_connection(
                     &crate::setup::codex::connection_path(home),
-                )?;
+                )?
+                .filter(|(url, _)| !url.is_empty());
                 let token_file = recorded.as_ref().map(|(_, t)| t.clone());
                 managed = recorded.map(|(url, token_file)| (url, !token_file.is_empty()));
                 token_file.filter(|v| !v.is_empty())
@@ -371,14 +374,14 @@ fn connection(host: &impl Host, home: &Path, report: &Report) -> Result<Connecti
     // The hooks' own rules for the managed connection: a tokenless one names
     // the URL whatever is exported; with a token an exported URL must agree,
     // or the hooks refuse it, and the bearer never goes to another daemon.
-    if let Some((recorded, has_token)) = managed.filter(|(u, _)| !u.is_empty()) {
+    if let Some((recorded, has_token)) = managed {
         match &url {
             Some(exported)
                 if has_token
                     && exported.trim_end_matches('/') != recorded.trim_end_matches('/') =>
             {
                 return Err(Fail::detail(format!(
-                    "{URL_KEY} names {exported}, but Codex's managed connection ({}) names {recorded}, and the hooks refuse that mismatch. Rerun the installer with --daemon-url set to the daemon Codex should use.",
+                    "{URL_KEY} names {exported}, but Codex's managed connection ({}) names {recorded}, and the hooks refuse that mismatch. Rerun the installer with the daemon Codex should use (--daemon-url, or -DaemonUrl for install.ps1); for a standalone run, unset {URL_KEY} or set it to {recorded}.",
                     crate::setup::codex::connection_path(home).display()
                 )));
             }
