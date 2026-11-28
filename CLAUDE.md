@@ -357,7 +357,9 @@ touched, with no retrofit sweep.
 - **A change merged without hosted CI** (a security advisory's private
   fork) first runs every hosted job's commands for each platform it
   touches on the dev machines (the Windows dev VM for Windows, a Linux dev
-  box for the rest), because nothing else tests it before master.
+  box for the rest; macOS has no dev machine, so the change notes that
+  macOS is untested before merge), because nothing else tests it before
+  master.
 - **A PR that adds a `windows-latest` test resting on real process
   spawn/wait/kill, sockets or named pipes, file locks or atomic replace, or
   timeouts (a harness `run.py` scenario included; a test that only mocks
