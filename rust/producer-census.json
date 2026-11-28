@@ -619,7 +619,7 @@
     "rust/shim/src/cli/update/clients/plugin.rs": "0368c717c63f22d40d24502e65d49e677cab29f0a1ee2adf3cbf29609cf6b274",
     "rust/shim/src/cli/update/clients/tests.rs": "c320a3c9a91f0a47e6e4befd55ae849b5a8310e189dd428f960a1dd960f088db",
     "rust/shim/src/cli/update/disk.rs": "f2a49f6a8571441504a42b9eddbb22836f00e0d6753b290975c4969b771eeaef",
-    "rust/shim/src/cli/update/documents.rs": "03ae45f2e2868806467bce138bda0a316fd6ea256c6f37f53f25e3c6102189fe",
+    "rust/shim/src/cli/update/documents.rs": "51d9cdf23723d79b94685573c2e6617cd33d9efcca26e58a0ae51f8bda406a78",
     "rust/shim/src/cli/update/engine.rs": "1538d8508a1558196042c6bd55e28ffe59b0ed5ea737a20709c03e99f043f070",
     "rust/shim/src/cli/update/full_handoff.rs": "68a42833bd7a2cf68d7c0db5497afcf111a9ff9e780d7dcc9fa23fdbf339c22e",
     "rust/shim/src/cli/update/mod.rs": "b789ee69c44d77835af41ce851564ddff770de468cde0e105a37e417dde71a56",

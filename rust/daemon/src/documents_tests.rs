@@ -165,28 +165,21 @@ fn errors_take_python_classes() {
             other => panic!("{name}: {other:?}"),
         }
     }
-    // On Windows the open fails: a text suffix and HTML raise the OSError
-    // itself, any other suffix wraps it (`Cannot read file {name}: {e}`).
+    // On Windows the open itself fails with access denied, which every
+    // suffix (text, HTML, the PDF's read outside its PDFium `try`, and any
+    // other) refuses as `document_unreadable`; nothing is read.
     #[cfg(windows)]
-    {
-        assert!(matches!(
-            extract_text(&at("folder.txt"), "folder.txt"),
-            Err(ToolError::Internal(_))
-        ));
-        assert!(matches!(
-            extract_text(&at("folder.html"), "folder.html"),
-            Err(ToolError::Internal(_))
-        ));
-        // The PDF branch reads first, outside its PDFium `try`, as HTML does.
-        assert!(matches!(
-            extract_text(&at("folder.pdf"), "folder.pdf"),
-            Err(ToolError::Internal(_))
-        ));
-        match extract_text(&at("folder.data"), "folder.data") {
-            Err(ToolError::Invalid(m)) => {
-                assert!(m.starts_with("Cannot read file folder.data: "), "{m}")
-            }
-            other => panic!("{other:?}"),
+    for name in ["folder.txt", "folder.html", "folder.data", "folder.pdf"] {
+        match extract_text(&at(name), name) {
+            Err(ToolError::Invalid(m)) => assert!(
+                m.starts_with(&format!(
+                    "{}: {} is inside a documents directory, but the daemon cannot read it (",
+                    crate::document_roots::UNREADABLE,
+                    at(name)
+                )),
+                "{name}: {m}"
+            ),
+            other => panic!("{name}: {other:?}"),
         }
     }
     // A text-suffix file gone since `exists()`: FileNotFoundError's text.
