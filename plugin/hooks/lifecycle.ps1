@@ -191,6 +191,29 @@ function Read-TurnDigest([string]$SessionId) {
     return $body
 }
 
+# A folder above a private file that is a reparse point (a symlink or a
+# junction) is followed only when the native client says no other account can
+# change it (rust/shim/src/private_path.rs), as the .sh hooks ask it. Only its
+# exact verdict line with exit 0 counts, so an older or missing client refuses.
+function Assert-PseudolifeAncestors([IO.FileInfo]$Item, [string]$Refusal) {
+    $linked = $false
+    $parent = $Item.Directory
+    while ($parent) {
+        if ($parent.Attributes -band [IO.FileAttributes]::ReparsePoint) { $linked = $true; break }
+        $parent = $parent.Parent
+    }
+    if (-not $linked) { return }
+    $launcher = if ($env:PSEUDOLIFE_SHIM_LAUNCHER) { $env:PSEUDOLIFE_SHIM_LAUNCHER }
+        elseif ($env:OS -eq 'Windows_NT') { Join-Path $env:LOCALAPPDATA 'pseudolife-mcp\bin\pseudolife-mcp.exe' }
+        else {
+            $data = if ($env:XDG_DATA_HOME) { $env:XDG_DATA_HOME } else { Join-Path $HOME '.local/share' }
+            Join-Path $data 'pseudolife-mcp/bin/pseudolife-mcp'
+        }
+    if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { throw $Refusal }
+    $answer = (& $launcher private-path-check $Item.FullName 2>&1 | Out-String).TrimEnd("`r", "`n")
+    if ($LASTEXITCODE -ne 0 -or $answer -cne 'pseudolife-private-path: trusted') { throw $Refusal }
+}
+
 function Get-PseudolifeToken([string]$TokenFile) {
     if (-not $TokenFile) {
         return [string]$env:PSEUDOLIFE_MCP_TOKEN
@@ -200,6 +223,7 @@ function Get-PseudolifeToken([string]$TokenFile) {
         ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.LinkType) {
         throw 'The configured credential file is not a private regular file.'
     }
+    Assert-PseudolifeAncestors $item 'The configured credential file is below a link the native client did not trust.'
     if ($IsWindows) {
         $acl = Get-Acl -LiteralPath $TokenFile
         $owner = ([Security.Principal.NTAccount]$acl.Owner).Translate(
@@ -238,6 +262,7 @@ function Get-PseudolifeConnection {
         ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.LinkType) {
         throw 'The managed Codex connection file is unsafe.'
     }
+    Assert-PseudolifeAncestors $item 'The managed Codex connection file is below a link the native client did not trust.'
     if ($IsWindows) {
         $acl = Get-Acl -LiteralPath $path
         $owner = ([Security.Principal.NTAccount]$acl.Owner).Translate(

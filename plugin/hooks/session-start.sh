@@ -207,7 +207,10 @@ if [ -n "$TOKEN_FILE" ]; then
         CONNECTION_ERROR=1
     else
         TOKEN=$(cat "$TOKEN_FILE")
-        if [ -z "$TOKEN" ] || printf '%s' "$TOKEN" | LC_ALL=C grep -q '[[:space:]]'; then
+        # A file saved with a CRLF line end (Notepad, Set-Content) ends in CR.
+        TOKEN=${TOKEN%$'\r'}
+        # grep reads lines, so a newline inside the token is checked apart.
+        if [ -z "$TOKEN" ] || [ "$TOKEN" != "${TOKEN//$'\n'/}" ] || printf '%s' "$TOKEN" | LC_ALL=C grep -q '[[:space:]]'; then
             CONNECTION_ERROR=1
         fi
     fi
@@ -224,6 +227,13 @@ INPUT=$(cat 2>/dev/null || true)
 SID=$(printf '%s' "$INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 [ -n "$SRC" ] || SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"session_start_reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+# Both go into query strings: only an id-shaped value counts, with the
+# character set coordination-prompt.sh uses (spelled out, never a range:
+# tests/test_hook_glob_ranges.py).
+case "$SID" in *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*) SID="" ;; esac
+[ "${#SID}" -le 128 ] || SID=""
+case "$SRC" in *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*) SRC="" ;; esac
+[ "${#SRC}" -le 64 ] || SRC=""
 # The per-turn memory-change note (user-prompt-submit.sh sources this script
 # with `memory-changes`): one request per turn, printing only when memory
 # changed since this session's last note (new lessons, other sessions'
@@ -363,12 +373,27 @@ fi
 # it: the installers do not put its directory on PATH, so the served update
 # notices name it by its path instead of a bare `pseudolife-mcp`. The daemon
 # shape-checks it before it reaches the model's context.
-LAUNCHER="${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}"
-if [ -f "$LAUNCHER" ]; then
+# Git Bash on Windows (Claude Code runs the .sh hooks there) finds it under
+# %LOCALAPPDATA%, as private_path_trusted() above does, and names it by its
+# drive path with forward slashes (cygpath -m), which runs as typed in both
+# Git Bash and PowerShell; backslashes would be stripped by Git Bash.
+SHOWN_LAUNCHER=""
+case "${OSTYPE:-}" in
+    msys*|mingw*|cygwin*)
+        LAUNCHER=${PSEUDOLIFE_SHIM_LAUNCHER:-}
+        [ -n "$LAUNCHER" ] || [ -z "${LOCALAPPDATA:-}" ] ||
+            LAUNCHER="$LOCALAPPDATA/pseudolife-mcp/bin/pseudolife-mcp.exe"
+        [ -z "$LAUNCHER" ] || LAUNCHER=$(cygpath -u "$LAUNCHER" 2>/dev/null) || LAUNCHER=""
+        [ -z "$LAUNCHER" ] || SHOWN_LAUNCHER=$(cygpath -m "$LAUNCHER" 2>/dev/null) || LAUNCHER="" ;;
+    *)
+        LAUNCHER="${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}"
+        SHOWN_LAUNCHER=$LAUNCHER ;;
+esac
+if [ -n "$LAUNCHER" ] && [ -f "$LAUNCHER" ]; then
     FOUND=$(command -v pseudolife-mcp 2>/dev/null || true)
     if [ -z "$FOUND" ] || ! [ "$FOUND" -ef "$LAUNCHER" ]; then
-        ENCODED=$(printf '%s' "$LAUNCHER" | sed -e 's/%/%25/g' -e 's/ /%20/g' -e 's/+/%2B/g' \
-            -e 's/&/%26/g' -e 's/#/%23/g' -e 's/\\/%5C/g')
+        ENCODED=$(printf '%s' "$SHOWN_LAUNCHER" | sed -e 's/%/%25/g' -e 's/ /%20/g' -e 's/+/%2B/g' \
+            -e 's/&/%26/g' -e 's/#/%23/g' -e 's/\\/%5C/g' -e 's/\[/%5B/g' -e 's/\]/%5D/g')
         QS="${QS:-?}${QS:+&}launcher=${ENCODED}"
     fi
 fi

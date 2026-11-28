@@ -285,6 +285,7 @@ frozen test_health_last_backup.py
 live test_heap_trim.py
 frozen test_hlc.py
 live test_hook_glob_ranges.py
+live test_hook_input_hygiene.py
 frozen test_hook_probe_budget.py
 live test_hooks_digest.py
 frozen test_hybrid_default.py
