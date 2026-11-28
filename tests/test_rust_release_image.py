@@ -1,4 +1,6 @@
 """Release gates for version checks, native assets and protected publication."""
+import copy
+import re
 from fnmatch import fnmatchcase
 from graphlib import TopologicalSorter
 from pathlib import Path
@@ -14,8 +16,10 @@ NATIVE_ASSET_JOBS = NATIVE_BUILD_JOBS | {"rust-assets-publish"}
 PROTECTED_PUBLISHERS = {"publish", "images", "rust-image", "registry", "release-ready"}
 
 EXPECTED_GATES = {
-    **{name: "github.event_name == 'release'" for name in ("guards", "build", "publish", "images", "registry")},
-    "rust-image": "github.event_name == 'release' && vars.PSEUDOLIFE_PUBLISH_RUST_DAEMON == 'true'",
+    **{
+        name: "github.event_name == 'release'"
+        for name in ("guards", "build", "publish", "images", "rust-image", "registry")
+    },
     "rust-assets": "!cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && needs.guards.result == 'success'))",
     "rust-assets-bundle": "!cancelled() && needs.rust-assets.result == 'success'",
     "rust-assets-publish": "!cancelled() && github.event_name == 'release' && needs.guards.result == 'success' && needs.rust-assets-bundle.result == 'success'",
@@ -52,7 +56,7 @@ def test_release_gate_rejects_added_dispatch_bypass(name):
         assert_release_gates(jobs)
 
 
-def test_rust_release_image_requires_maintainer_decision(jobs):
+def test_rust_release_image_builds_the_rust_daemon(jobs):
     job = jobs["rust-image"]
     assert job["needs"] == "publish"
     assert job["permissions"] == {"contents": "read", "packages": "write"}
@@ -86,8 +90,6 @@ def _reachable_jobs(jobs, event, unsuccessful=()):
 
     The budget evaluator treats those results as skipped. For the conditions
     pinned here, failed and skipped prerequisites both block success checks.
-    Repository variables are unknown, so this includes the opt-in image job
-    whenever its prerequisites can succeed.
     """
     blocked = set(unsuccessful)
     graph = {name: needs_of(job) for name, job in jobs.items()}
@@ -234,3 +236,52 @@ def test_native_archives_reach_the_release_before_pypi(jobs):
     for name in NATIVE_ASSET_JOBS | {"guards", "build"}:
         assert "continue-on-error" not in jobs[name], name
         assert not any("continue-on-error" in step for step in jobs[name]["steps"]), name
+
+
+def test_no_release_job_is_gated_by_a_repository_variable(jobs):
+    # An unset repository variable skips its job without failing the run, and a
+    # skipped rust-image leaves RELEASE-READY.json absent: native clients would
+    # then never learn of a release that PyPI and GHCR already serve.
+    for name, job in jobs.items():
+        assert "vars." not in str(job.get("if", "")), name
+
+
+PUBLISHER_URL = (
+    "https://github.com/modelcontextprotocol/registry/releases/download/"
+    "v${PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+)
+
+
+def assert_publisher_is_hash_pinned(job):
+    env = job["env"]
+    assert re.fullmatch(r"\d+\.\d+\.\d+", env["PUBLISHER_VERSION"]), "PUBLISHER_VERSION"
+    assert re.fullmatch(r"[0-9a-f]{64}", env["PUBLISHER_SHA256"]), "PUBLISHER_SHA256"
+    step = next(s for s in job["steps"] if s.get("name") == "Install mcp-publisher")
+    lines = [line.strip() for line in step["run"].splitlines()]
+    check = 'echo "${PUBLISHER_SHA256}  publisher.tar.gz" | sha256sum -c -'
+    assert check in lines, "sha256sum check"
+    # The tarball is checked before anything unpacks or runs it.
+    unpack = next(i for i, line in enumerate(lines) if line.startswith("tar "))
+    assert lines.index(check) < unpack, "check before unpack"
+    assert PUBLISHER_URL in step["run"], "download URL"
+
+
+def test_mcp_publisher_download_is_hash_pinned(jobs):
+    # The registry job holds an OIDC token, so the tool it runs is verified.
+    assert_publisher_is_hash_pinned(jobs["registry"])
+
+
+@pytest.mark.parametrize("mutation", ["drop-check", "check-after-unpack", "short-hash"])
+def test_publisher_pin_guard_rejects_unverified_installs(jobs, mutation):
+    job = copy.deepcopy(jobs["registry"])
+    step = next(s for s in job["steps"] if s.get("name") == "Install mcp-publisher")
+    check = 'echo "${PUBLISHER_SHA256}  publisher.tar.gz" | sha256sum -c -'
+    lines = [line for line in step["run"].splitlines() if check not in line]
+    if mutation == "drop-check":
+        step["run"] = "\n".join(lines)
+    elif mutation == "check-after-unpack":
+        step["run"] = "\n".join(lines + [check])
+    else:
+        job["env"]["PUBLISHER_SHA256"] = job["env"]["PUBLISHER_SHA256"][:40]
+    with pytest.raises(AssertionError):
+        assert_publisher_is_hash_pinned(job)
