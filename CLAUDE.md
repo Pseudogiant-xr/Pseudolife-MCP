@@ -207,6 +207,11 @@ touched, with no retrofit sweep.
   overlap's tests, plus the doc guards if docs overlap.
 - A refused or interrupted run is not a pass, and a changed imported tree
   needs a fresh run except under the review-fix rule.
+- **Collect every failure before fixing one:** when a run fails, rerun the
+  failing step or slice with fail-fast off
+  (`cargo nextest run --no-fail-fast`, pytest without `-x`, every failed
+  matrix leg) on the platform that failed, and fix the whole list in one
+  round, because a fail-fast stop hides every failure behind the first.
 - **Platform-specific changes** (`os.name` / `sys.platform` branches,
   `creationflags`, `msvcrt`, `SIGBREAK`, scheduled tasks, launchd, the
   `.ps1` launchers; code resting on signals, kill, file locks, detached
@@ -349,6 +354,12 @@ touched, with no retrofit sweep.
   "Sharing" says: a reproduction gets a fix PR, a confirmed flake a deflake
   PR, and an unreproduced failure a deflake PR or an issue naming the
   hosted run once it recurs.
+- **A change merged without hosted CI** (a security advisory's private
+  fork) first runs every hosted job's commands for each platform it
+  touches on the dev machines (the Windows dev VM for Windows, a Linux dev
+  box for the rest; macOS has no dev machine, so the change notes that
+  macOS is untested before merge), because nothing else tests it before
+  master.
 - **A PR that adds a `windows-latest` test resting on real process
   spawn/wait/kill, sockets or named pipes, file locks or atomic replace, or
   timeouts (a harness `run.py` scenario included; a test that only mocks
