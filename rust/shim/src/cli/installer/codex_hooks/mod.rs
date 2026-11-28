@@ -325,20 +325,41 @@ type Connection = (Vec<(String, Option<String>)>, String, Option<String>);
 
 /// The connection the check uses: the credential step's token file and
 /// URL over this process's environment (the hooks Codex starts inherit the
-/// same), and the bearer read from that file.
-fn connection(host: &impl Host, report: &Report) -> Result<Connection, Fail> {
+/// same), and the bearer read from that file. With no registration yet (a
+/// first install: `codex mcp add` runs after this step) the hooks find
+/// their token through the managed connection, so the check reads it there
+/// too, or it would read the daemon with no bearer and be refused (hosted
+/// acceptance run 46138068421).
+fn connection(host: &impl Host, home: &Path, report: &Report) -> Result<Connection, Fail> {
     let mut environment = Vec::new();
     let mut file = host.var(FILE_KEY).filter(|v| !v.is_empty());
     let mut literal = host.var(TOKEN_KEY).filter(|v| !v.is_empty());
+    // The managed connection, when the check falls back to it: its URL and
+    // whether it records a token file.
+    let mut managed: Option<(String, bool)> = None;
     if let Some(path) = report
         .credential
         .get("credential_file_path")
         .and_then(Value::as_str)
     {
-        file = (!path.is_empty()).then(|| path.to_owned());
-        environment.push((FILE_KEY.to_owned(), file.clone()));
+        let configured = (!path.is_empty()).then(|| path.to_owned());
+        environment.push((FILE_KEY.to_owned(), configured.clone()));
         environment.push((TOKEN_KEY.to_owned(), None));
         literal = None;
+        file = match configured {
+            Some(path) => Some(path),
+            None => {
+                // One that names no URL is a connection error to the
+                // hooks, so its token file is not used.
+                let recorded = crate::setup::codex::read_connection(
+                    &crate::setup::codex::connection_path(home),
+                )?
+                .filter(|(url, _)| !url.is_empty());
+                let token_file = recorded.as_ref().map(|(_, t)| t.clone());
+                managed = recorded.map(|(url, token_file)| (url, !token_file.is_empty()));
+                token_file.filter(|v| !v.is_empty())
+            }
+        };
     }
     let mut url = host.var(URL_KEY).filter(|v| !v.is_empty());
     if let Some(chosen) = report
@@ -349,6 +370,24 @@ fn connection(host: &impl Host, report: &Report) -> Result<Connection, Fail> {
     {
         url = Some(chosen.to_owned());
         environment.push((URL_KEY.to_owned(), url.clone()));
+    }
+    // The hooks' own rules for the managed connection: a tokenless one names
+    // the URL whatever is exported; with a token an exported URL must agree,
+    // or the hooks refuse it, and the bearer never goes to another daemon.
+    if let Some((recorded, has_token)) = managed {
+        match &url {
+            Some(exported)
+                if has_token
+                    && exported.trim_end_matches('/') != recorded.trim_end_matches('/') =>
+            {
+                return Err(Fail::detail(format!(
+                    "{URL_KEY} names {exported}, but Codex's managed connection ({}) names {recorded}, and the hooks refuse that mismatch. Rerun the installer with the daemon Codex should use (--daemon-url, or -DaemonUrl for install.ps1); for a standalone run, unset {URL_KEY} or set it to {recorded}.",
+                    crate::setup::codex::connection_path(home).display()
+                )));
+            }
+            Some(_) if has_token => {}
+            _ => url = Some(recorded),
+        }
     }
     let url = url.unwrap_or_else(|| crate::daemon_url::DEFAULT_URL.to_owned());
     let token = match file {
@@ -572,7 +611,7 @@ async fn hook_setup<H: Host>(
         );
         return Ok(());
     }
-    let (environment, url, token) = connection(host, report)?;
+    let (environment, url, token) = connection(host, home, report)?;
     let daemon = host.daemon(url, token);
     let digest_dir = verify::digest_dir(&|key| {
         environment

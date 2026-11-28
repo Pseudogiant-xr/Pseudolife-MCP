@@ -536,6 +536,105 @@ def test_mailbox_approval_notice_requires_ready_hooks_and_preserves_approvals(
         assert not result.get("mailbox_approval_notice")
 
 
+@pytest.mark.parametrize("case", [
+    "token", "tokenless", "unexported", "conflict", "slash", "tokenless-elsewhere", "no-url"])
+def test_first_install_check_reads_the_daemon_with_the_hooks_credential(
+        tmp_path, monkeypatch, case):
+    """Before `codex mcp add` no registration names a token file, so the
+    hooks use the managed connection, and the check's own requests must too:
+    without it the episode read had no bearer and the daemon refused it
+    (hosted acceptance run 46138068421). The hooks keep their own fallback
+    (no token file is exported to them); a tokenless managed connection sends
+    no bearer; an exported URL that disagrees with a tokenful managed one is
+    refused before any request, as the hooks refuse it. Near misses: a
+    trailing slash is no mismatch; a tokenless managed connection names the
+    daemon whatever is exported; one that names no URL lends no bearer."""
+    home = tmp_path / "codex"
+    home.mkdir()
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    copy = home / "pseudolife" / "token"
+    copy.parent.mkdir()
+    setup._write_token_file(copy, "fixture-installer-bearer")
+    url = "http://10.0.0.5:8765"
+    tokenless = case in {"tokenless", "tokenless-elsewhere"}
+    setup._private_json(home / "pseudolife" / "connection.json",
+                        setup._connection_values("" if case == "no-url" else url,
+                                                 "" if tokenless else str(copy)))
+    # What the installer exports for the step (install.sh's hook call).
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN_FILE", str(copy))
+    if case == "unexported":
+        monkeypatch.delenv("PSEUDOLIFE_MCP_DAEMON_URL", raising=False)
+    else:
+        exported = {"conflict": "http://10.0.0.6:8765", "tokenless-elsewhere": "http://10.0.0.6:8765",
+                    "slash": url + "/"}.get(case, url)
+        monkeypatch.setenv("PSEUDOLIFE_MCP_DAEMON_URL", exported)
+    selected = [hook(home, trustStatus="trusted")]
+    layer = {}
+    runtime_config = {"config": layer, "layers": [{**config(home)["layers"][0], "config": layer}]}
+    requests = []
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def urlopen(request, timeout=None):
+        requests.append((request.full_url, request.get_header("Authorization")))
+        return Response(b'{"episodes": []}')
+
+    def verify(*args):
+        # The hooks' environment: no token file, so they use the managed one.
+        assert "PSEUDOLIFE_MCP_TOKEN_FILE" not in os.environ
+        setup.daemon_request("/api/episodes?limit=100")
+        return {"session_start": True}
+
+    monkeypatch.setattr(setup, "urlopen", urlopen)
+    monkeypatch.setattr(setup, "resolve_codex", lambda: "fixture-codex")
+    monkeypatch.setattr(setup, "codex", lambda *args: nullcontext(None))
+    monkeypatch.setattr(setup, "inventory", lambda *args: (runtime_config, selected))
+    monkeypatch.setattr(setup, "configure_credential_file", lambda *args: {
+        "backup": None, "credential_file_configured": False, "credential_file_path": "",
+        "daemon_url": None, "connection_configured": False})
+    monkeypatch.setattr(setup, "select_hooks", lambda *args: ("manual", selected, []))
+    monkeypatch.setattr(setup, "vet_manual", lambda *args, **kwargs: None)
+    monkeypatch.setattr(setup, "complete_set", lambda *args: True)
+    monkeypatch.setattr(setup, "verify", verify)
+    result = setup.setup(options(source="manual", trust="no", non_interactive=True))
+    if case == "conflict":
+        assert result["status"] == "unavailable"
+        assert "http://10.0.0.6:8765" in result["recovery"] and "mismatch" in result["recovery"]
+        assert "-DaemonUrl" in result["recovery"] and f"set it to {url}" in result["recovery"]
+        assert requests == []
+    else:
+        assert result["status"] == "ready", result.get("recovery")
+        bearer = None if tokenless or case == "no-url" else "Bearer fixture-installer-bearer"
+        assert requests == [(url + "/api/episodes?limit=100", bearer)]
+    # The installer's own environment is restored after the check, and the
+    # managed connection served only the check: a later daemon request uses
+    # the environment again, with no token file exported.
+    assert os.environ["PSEUDOLIFE_MCP_TOKEN_FILE"] == str(copy)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN_FILE")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DAEMON_URL", "http://10.0.0.7:8765")
+    requests.clear()
+    setup.daemon_request("/api/episodes?limit=1")
+    assert requests == [("http://10.0.0.7:8765/api/episodes?limit=1", None)]
+
+
+def test_the_check_names_the_credential_file_it_could_not_read(tmp_path, monkeypatch):
+    """The managed connection's token file is now one the check reads, so a
+    broken one is named, with the fix, as the native check names it."""
+    missing = tmp_path / "codex" / "pseudolife" / "token"
+    monkeypatch.setattr(setup, "urlopen", lambda *args, **kwargs: pytest.fail("no request"))
+    monkeypatch.setitem(setup._VERIFIER, "token_file", str(missing))
+    monkeypatch.setitem(setup._VERIFIER, "daemon_url", "http://10.0.0.5:8765")
+    with pytest.raises(setup.SetupError) as raised:
+        setup.daemon_request("/api/episodes?limit=100")
+    assert str(missing) in str(raised.value) and "rerun the installer" in str(raised.value)
+
+
 @pytest.mark.parametrize("ready", [True, False])
 def test_main_prints_mailbox_notice_only_for_ready_hooks(monkeypatch, capsys, ready):
     result = {"status": "ready" if ready else "unavailable", "instructions": "skipped"}
