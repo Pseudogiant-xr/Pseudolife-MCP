@@ -7,6 +7,9 @@ $ownerExe = [string]$c.OwnerExe
 $kind = [string]$c.Kind
 $port = [int]$c.Port
 $name = [string]$c.Name
+# An IPv6 literal is bracketed in a URL.
+$urlHost = [string]$c.Host
+if ($urlHost.Contains(':') -and -not $urlHost.StartsWith('[')) { $urlHost = "[$urlHost]" }
 function Stop-TaskLocked([string]$line) {
     # A refusal over a task this shell may not change, before any change.
     # The native client passes LockExitCode so its callers can tell it from
@@ -36,17 +39,37 @@ function Format-ForeignCommand([string]$command) {
     return $command
 }
 function Get-NativeTaskCode([string]$executable, [string]$arguments, [string]$runtimeExe) {
-    $metadata = if ($runtimeExe) { "`$runtimeExe = '$($runtimeExe.Replace("'", "''"))'`n" } else { '' }
+    $metadata = if ($runtimeExe) { "`$runtimeExe = '$(ConvertTo-QuotedLiteralBody $runtimeExe)'`n" } else { '' }
     $metadata + @"
 `$psi = New-Object System.Diagnostics.ProcessStartInfo
-`$psi.FileName = '$($executable.Replace("'", "''"))'
-`$psi.Arguments = '$($arguments.Replace("'", "''"))'
+`$psi.FileName = '$(ConvertTo-QuotedLiteralBody $executable)'
+`$psi.Arguments = '$(ConvertTo-QuotedLiteralBody $arguments)'
 `$psi.UseShellExecute = `$false
 `$psi.CreateNoWindow = `$true
 `$process = [System.Diagnostics.Process]::Start(`$psi)
 `$process.WaitForExit()
 exit `$process.ExitCode
 "@
+}
+# PowerShell ends a single-quoted string at any of these five characters
+# (' and the curly quotes U+2018-U+201B), so a literal doubles each one; a
+# path with a folder such as O<U+2019>Brien in it is otherwise cut short. Tested as
+# char codes because Windows PowerShell reads this BOM-less file as ANSI,
+# and inside each function because harnesses import functions by name.
+function ConvertTo-QuotedLiteralBody([string]$value) {
+    $builder = New-Object System.Text.StringBuilder
+    foreach ($ch in $value.ToCharArray()) {
+        if ([int]$ch -eq 0x27 -or ([int]$ch -ge 0x2018 -and [int]$ch -le 0x201B)) { [void]$builder.Append($ch) }
+        [void]$builder.Append($ch)
+    }
+    $builder.ToString()
+}
+function ConvertFrom-QuotedLiteralBody([string]$body) {
+    foreach ($code in @(0x27, 0x2018, 0x2019, 0x201A, 0x201B)) {
+        $q = [string][char]$code
+        $body = $body.Replace($q + $q, $q)
+    }
+    $body
 }
 function Get-RegisteredInvocation($task) {
     foreach ($item in $task.Actions) {
@@ -72,13 +95,13 @@ function Get-RegisteredInvocation($task) {
                     continue
                 }
                 if ($code -notmatch '(?m)^\$psi\.FileName = ''((?:[^'']|'''')*)''\r?$') { continue }
-                $exe = $Matches[1].Replace("''", "'")
+                $exe = ConvertFrom-QuotedLiteralBody $Matches[1]
                 if ($code -notmatch '(?m)^\$psi\.Arguments = ''((?:[^'']|'''')*)''\r?$') { continue }
-                $arguments = $Matches[1].Replace("''", "'")
+                $arguments = ConvertFrom-QuotedLiteralBody $Matches[1]
                 # --native-exe can name a custom waiting launcher. Its exact
                 # generated wrapper identifies that registration after restart;
                 # arbitrary encoded code with similar arguments does not.
-                if ($code -match '^\$runtimeExe = ''((?:[^'']|'''')*)''\r?\n') { $runtimeExe = $Matches[1].Replace("''", "'") }
+                if ($code -match '^\$runtimeExe = ''((?:[^'']|'''')*)''\r?\n') { $runtimeExe = ConvertFrom-QuotedLiteralBody $Matches[1] }
                 $expected = Get-NativeTaskCode $exe $arguments $runtimeExe
                 $nativeWrapper = $code.Replace("`r`n", "`n").TrimEnd() -ceq $expected.Replace("`r`n", "`n").TrimEnd()
             } catch { continue }
@@ -365,7 +388,9 @@ function Format-TaskLock($lock, [switch]$Removal, [string]$Follows, [string]$Rea
     # -Follows names the settings file a task this shell cannot change still
     # reads at every start: the command is then only for a user who wants a
     # task of their own. -Reason says why the task cannot be followed.
-    $quoted = $lock.TaskName.Replace("'", "''")
+    # PowerShell ends a single-quoted string at ' and at each curly quote
+    # U+2018-U+201B, so each one is doubled in the pasted command.
+    $quoted = -join @($lock.TaskName.ToCharArray() | ForEach-Object { if ([int]$_ -eq 0x27 -or ([int]$_ -ge 0x2018 -and [int]$_ -le 0x201B)) { [string]$_ + $_ } else { [string]$_ } })
     if ($lock.Hidden) {
         return ("a scheduled task named '$($lock.TaskName)' exists but this account cannot read it, " +
                 "so it belongs to another account on this machine; nothing was changed. Ask that account to remove it")
@@ -689,7 +714,7 @@ function Test-HealthyListener {
         $owner = Get-CimInstance Win32_Process -Filter "ProcessId = $($candidate.OwningProcess)" -ErrorAction SilentlyContinue
         if ($owner -and (Test-SamePath $owner.ExecutablePath $ownerExe) -and (Test-NativeInvocation $owner.CommandLine $kind $c.EnvFile)) {
             try {
-                $null = Invoke-WebRequest -UseBasicParsing -Uri "http://$($c.Host):$port/health" -TimeoutSec 2
+                $null = Invoke-WebRequest -UseBasicParsing -Uri "http://${urlHost}:$port/health" -TimeoutSec 2
                 $verifyArgs = @('extractor-shim', 'verify-settings', [string]$candidate.OwningProcess) + @($c.ServeArgs | Select-Object -Skip 1)
                 & $ownerExe @verifyArgs *> $null
                 if ($LASTEXITCODE -ne 0) { return $false }

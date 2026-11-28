@@ -349,3 +349,51 @@ fn extractor_shim_autostart_codex_preflight() {
 fn extractor_shim_scheduler_controls() {
     autostart("claude", "controls");
 }
+
+/// A line break that reaches the unit only after resolution (the receipt
+/// directory under XDG_CACHE_HOME) is refused before the platform helper
+/// runs. PATH holds only bash, so even without the refusal the helper stops
+/// at its own tool check and nothing is registered.
+#[cfg(target_os = "linux")]
+#[test]
+fn install_autostart_refuses_a_resolved_path_with_a_line_break() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = std::env::temp_dir().join(format!("w129-autostart-{}", uuid::Uuid::new_v4()));
+    let bin = root.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    std::os::unix::fs::symlink("/bin/bash", bin.join("bash")).unwrap();
+    let cli = root.join("claude");
+    fs::write(&cli, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
+    let settings = root.join("settings.env");
+    let output = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"))
+        .args([
+            "extractor-shim",
+            "install-autostart",
+            "claude",
+            "--env-file",
+        ])
+        .arg(&settings)
+        .arg("--cli")
+        .arg(&cli)
+        .args(["--port", "18099", "--host", "127.0.0.1"])
+        .env_clear()
+        .env("HOME", &root)
+        .env("PATH", &bin)
+        .env("XDG_CONFIG_HOME", root.join("config"))
+        .env(
+            "XDG_CACHE_HOME",
+            root.join("cache\nExecStartPre=/bin/false"),
+        )
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let settings_written = settings.exists();
+    let _ = fs::remove_dir_all(&root);
+    assert!(!output.status.success(), "{output:?}");
+    assert!(
+        stderr.contains("--receipt-dir contains a line break or NUL"),
+        "{stderr}"
+    );
+    assert!(!settings_written);
+}

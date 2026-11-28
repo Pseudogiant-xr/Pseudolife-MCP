@@ -126,7 +126,7 @@ if ($Case -in @('LateLauncherChild','LateOldRuntimeRecorded','LateLegacyUnseen',
     $kind = 'codex'
     $arguments = '"extractor-shim" "codex" "--env-file" "' + $settings + '"'
     $ast = [Management.Automation.Language.Parser]::ParseFile($Source, [ref]$null, [ref]$null)
-    foreach ($functionName in @('Test-SamePath','Test-NativeInvocation','Get-NativeTaskCode','Get-RegisteredInvocation','Assert-ShimRegistration','Get-OwnedTaskProcesses','Stop-CapturedProcess','Read-RootScheduledTask','Get-TaskRegistration','Get-TaskOwnership','Wait-TaskStopped','Remove-OwnedTask')) {
+    foreach ($functionName in @('Test-SamePath','Test-NativeInvocation','Get-NativeTaskCode','ConvertTo-QuotedLiteralBody','ConvertFrom-QuotedLiteralBody','Get-RegisteredInvocation','Assert-ShimRegistration','Get-OwnedTaskProcesses','Stop-CapturedProcess','Read-RootScheduledTask','Get-TaskRegistration','Get-TaskOwnership','Wait-TaskStopped','Remove-OwnedTask')) {
         $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
         if ($definition) { Invoke-Expression $definition.Extent.Text }
     }
@@ -250,7 +250,7 @@ if ($Case -in @('DetachedClaude','DetachedCodex','DetachedCodexCli')) {
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
     $task = [PSCustomObject]@{TaskName=$historicalName;Actions=@([PSCustomObject]@{Execute='powershell.exe';Arguments="-NoProfile -WindowStyle Hidden -EncodedCommand $encoded"})}
     $ast = [Management.Automation.Language.Parser]::ParseFile($Source, [ref]$null, [ref]$null)
-    foreach ($functionName in @('Test-SamePath','Get-NativeTaskCode','Get-RegisteredInvocation','Get-OwnedTaskProcesses')) {
+    foreach ($functionName in @('Test-SamePath','Get-NativeTaskCode','ConvertTo-QuotedLiteralBody','ConvertFrom-QuotedLiteralBody','Get-RegisteredInvocation','Get-OwnedTaskProcesses')) {
         $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
         if ($definition) { Invoke-Expression $definition.Extent.Text }
     }

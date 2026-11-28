@@ -907,3 +907,25 @@ def test_the_runners_real_command_line_is_proved(tmp_path: Path, kind: str, chec
             proc = _run(script, shell, env=env)
             assert proc.returncode == 0, (shell, proc.stderr)
             assert proc.stdout.strip() == proved, (shell, kind, checkout_name, recorded_port, command, proc.stdout)
+
+
+def test_a_curly_quote_in_the_task_name_survives_the_pasted_command() -> None:
+    """PowerShell also ends a single-quoted string at the curly quotes
+    U+2018-U+201B, so the command a locked task's line ends with doubles
+    them too: it parses, and names the task exactly, in both copies."""
+    check = r"""
+$name = 'O' + [char]0x2019 + 'Brien ' + [char]0x2018 + 'Shim' + [char]0x201B + [char]0x201A + ' it''s'
+$lock = [PSCustomObject]@{TaskName=$name; Owner='Administrators'; Hidden=$false; Unresolved=''; OtherUser=$false}
+$line = Format-TaskLock $lock
+$command = $line.Substring($line.IndexOf('Stop-ScheduledTask'))
+$errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseInput($command, [ref]$null, [ref]$errors)
+if ($errors.Count) { 'PARSE ' + $errors[0].Message; exit }
+$literals = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.StringConstantExpressionAst] -and $n.StringConstantType -eq 'SingleQuoted' }, $true) | ForEach-Object { $_.Value })
+if ($literals.Count -eq 4 -and $literals[1] -ceq $name -and $literals[3] -ceq $name) { 'OK' } else { 'LITERALS ' + $literals.Count }
+"""
+    for path in (LOCK, NATIVE):
+        for shell in _shells():
+            proc = _run(_block(_read(path), "task lock") + check, shell)
+            assert proc.returncode == 0, (path.name, shell, proc.stderr)
+            assert proc.stdout.strip() == "OK", (path.name, shell, proc.stdout)
