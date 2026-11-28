@@ -971,7 +971,7 @@ pub async fn apply_replace(
         .map_err(|failure| failure.reason)
 }
 
-fn connection_bytes(url: &str, token_file: &str) -> Vec<u8> {
+pub(crate) fn connection_bytes(url: &str, token_file: &str) -> Vec<u8> {
     // The hooks read this exact five-line format without a JSON interpreter.
     format!(
         "{{\n  \"version\": 1,\n  \"daemon_url\": \"{}\",\n  \"token_file\": \"{}\"\n}}\n",

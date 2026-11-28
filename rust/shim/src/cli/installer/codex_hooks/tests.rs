@@ -1549,6 +1549,103 @@ async fn consent_before_the_server_is_registered_defers_the_approval_and_says_so
     assert_eq!(declined.mailbox_approval.as_deref(), Some("declined"));
 }
 
+/// What the installers' credential step (`installer codex-credentials`)
+/// leaves on a first install, before any Codex registration exists: Codex's
+/// private token copy and the managed connection the hooks read. The hook
+/// step then runs with that copy and URL exported, as `install-native.sh`
+/// and `install-native.ps1` export them.
+fn credential_step_before_registration(world: &mut World, token_file: Option<&str>) {
+    const URL: &str = "http://10.0.0.5:8765";
+    let copy = crate::setup::codex::token_copy_path(&world.home);
+    fs::create_dir_all(copy.parent().unwrap()).unwrap();
+    crate::board::state::atomic_create(&copy, b"fixture-installer-bearer\n").unwrap();
+    let copy = copy.to_string_lossy().into_owned();
+    let recorded = token_file.unwrap_or(&copy);
+    crate::board::state::atomic_create(
+        &crate::setup::codex::connection_path(&world.home),
+        &crate::setup::codex::connection_bytes(URL, recorded),
+    )
+    .unwrap();
+    world.host.env.insert("PSEUDOLIFE_MCP_DAEMON_URL".into(), URL.into());
+    if token_file.is_none() {
+        world
+            .host
+            .env
+            .insert("PSEUDOLIFE_MCP_TOKEN_FILE".into(), copy.clone());
+    }
+}
+
+#[tokio::test]
+async fn a_first_install_verifies_with_the_credential_the_hooks_use() {
+    // Hosted acceptance run 46138068421 (v0.26.0, macOS): a paired
+    // client-only install approved its hooks, the hooks answered with the
+    // managed connection, and the check's own episode read went out with
+    // no bearer, so the daemon refused it and the install exited 5.
+    let mut world = World::new();
+    without_registration(&world);
+    credential_step_before_registration(&mut world, None);
+    let report = world.run("manual", "yes", "auto").await;
+    assert_eq!(report.status, "ready", "{:?}", report.recovery);
+    assert_eq!(
+        *world.host.connected.borrow(),
+        Some((
+            "http://10.0.0.5:8765".to_owned(),
+            Some("fixture-installer-bearer".to_owned())
+        )),
+        "the check must read the daemon with the token the hooks send"
+    );
+    // The hooks still find that token through the managed connection: the
+    // check does not hand them a token file of its own.
+    let opened = world.host.shared.opened.borrow();
+    let (_, environment) = opened.last().unwrap();
+    assert!(
+        environment.contains(&("PSEUDOLIFE_MCP_TOKEN_FILE".to_owned(), None)),
+        "{environment:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_first_install_on_a_tokenless_connection_checks_without_a_bearer() {
+    // The near miss: a managed connection that records no token file is a
+    // tokenless daemon, and the check sends no bearer, as the hooks do.
+    let mut world = World::new();
+    without_registration(&world);
+    credential_step_before_registration(&mut world, Some(""));
+    let report = world.run("manual", "yes", "auto").await;
+    assert_eq!(report.status, "ready", "{:?}", report.recovery);
+    assert_eq!(
+        *world.host.connected.borrow(),
+        Some(("http://10.0.0.5:8765".to_owned(), None))
+    );
+}
+
+#[tokio::test]
+async fn a_registered_token_file_outranks_the_managed_connection() {
+    // A rerun: the registration names the token file, and the check uses it.
+    let mut world = World::new();
+    register_as_codex_mcp_add(&world, "/opt/pseudolife-mcp");
+    let other = world.home.join("pseudolife").join("other.token");
+    crate::board::state::atomic_create(&other, b"fixture-other-bearer\n").unwrap();
+    crate::board::state::atomic_create(
+        &crate::setup::codex::connection_path(&world.home),
+        &crate::setup::codex::connection_bytes(
+            "http://10.0.0.5:8765",
+            &other.to_string_lossy(),
+        ),
+    )
+    .unwrap();
+    world.host.env.insert(
+        "PSEUDOLIFE_MCP_DAEMON_URL".into(),
+        "http://10.0.0.5:8765".into(),
+    );
+    let report = world.run("manual", "yes", "auto").await;
+    assert_eq!(report.status, "ready", "{:?}", report.recovery);
+    assert_eq!(
+        world.host.connected.borrow().as_ref().map(|(_, t)| t.clone()),
+        Some(Some("fixture-installer-bearer".to_owned()))
+    );
+}
+
 #[tokio::test]
 async fn a_server_another_layer_registers_is_not_deferred() {
     let world = World::new();
