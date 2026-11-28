@@ -824,25 +824,54 @@ def credential_environment(path, daemon_url):
             os.environ["PSEUDOLIFE_MCP_DAEMON_URL"] = before_url
 
 
-def verification_credential(home, report):
-    """The token file and URL the check reads the daemon with: the
-    credential step's, or, with no Codex registration yet (a first install
-    registers the server after this step), the managed connection the hooks
-    themselves fall back to, so the check is not refused for a missing
-    bearer (hosted acceptance run 46138068421)."""
-    path, daemon_url = report.get("credential_file_path"), report.get("daemon_url")
-    if path == "":
+# The connection the check's own daemon requests use when it falls back to
+# the managed one; empty otherwise (see verifier_connection).
+_VERIFIER = {}
+
+
+@contextmanager
+def verifier_connection(home, report):
+    """With no Codex registration yet (a first install registers the server
+    after this step) the hooks find their token through the managed
+    connection, and the check's own requests use it too, or they reach the
+    daemon with no bearer and are refused (hosted acceptance run
+    46138068421). Only those requests: the hooks keep their own fallback.
+    Follows the hooks' rules: a tokenless managed connection names the URL,
+    and with a token an exported URL must agree with it."""
+    chosen = {}
+    if report.get("credential_file_path") == "":
         recorded = _connection.read_connection(_connection.connection_path(home))
-        if recorded is not None and recorded[1]:
-            path, daemon_url = recorded[1], daemon_url or recorded[0]
-    return path, daemon_url
+        if recorded is not None and recorded[0]:
+            managed_url, token_file = recorded
+            exported = os.environ.get("PSEUDOLIFE_MCP_DAEMON_URL", "")
+            if not token_file:
+                chosen = {"token_file": "", "daemon_url": managed_url}
+            elif exported and exported.rstrip("/") != managed_url.rstrip("/"):
+                raise SetupError(
+                    f"PSEUDOLIFE_MCP_DAEMON_URL names {exported}, but Codex's managed connection "
+                    f"({_connection.connection_path(home)}) names {managed_url}, and the hooks refuse "
+                    "that mismatch. Rerun the installer with --daemon-url set to the daemon Codex "
+                    "should use.")
+            else:
+                chosen = {"token_file": token_file, "daemon_url": exported or managed_url}
+    _VERIFIER.clear()
+    _VERIFIER.update(chosen)
+    try:
+        yield
+    finally:
+        _VERIFIER.clear()
 
 
 def daemon_request(path, *, text=False):
-    url = os.environ.get("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:8765").rstrip("/")
+    url = (_VERIFIER.get("daemon_url")
+           or os.environ.get("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:8765")).rstrip("/")
     headers = {}
     try:
-        token = CredentialProvider.from_environment().snapshot().token
+        if "token_file" in _VERIFIER:
+            provider = CredentialProvider(path=_VERIFIER["token_file"] or None)
+        else:
+            provider = CredentialProvider.from_environment()
+        token = provider.snapshot().token
     except CredentialError as error:
         raise SetupError(
             "The configured credential file is missing, unsafe, or malformed.") from error
@@ -1088,7 +1117,8 @@ def setup(args):
                         report["recovery"] = "PseudoLife hooks await approval. Rerun setup interactively or review them in Codex /hooks."
                     else:
                         with credential_environment(
-                                *verification_credential(home, report)):
+                                report.get("credential_file_path"),
+                                report.get("daemon_url")), verifier_connection(home, report):
                             report["verified"] = verify(
                                 executable, home, cwd, config, hooks, selected)
                         report["status"] = "ready"

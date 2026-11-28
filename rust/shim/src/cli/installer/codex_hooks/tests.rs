@@ -1566,7 +1566,10 @@ fn credential_step_before_registration(world: &mut World, token_file: Option<&st
         &crate::setup::codex::connection_bytes(URL, recorded),
     )
     .unwrap();
-    world.host.env.insert("PSEUDOLIFE_MCP_DAEMON_URL".into(), URL.into());
+    world
+        .host
+        .env
+        .insert("PSEUDOLIFE_MCP_DAEMON_URL".into(), URL.into());
     if token_file.is_none() {
         world
             .host
@@ -1620,6 +1623,43 @@ async fn a_first_install_on_a_tokenless_connection_checks_without_a_bearer() {
 }
 
 #[tokio::test]
+async fn the_managed_bearer_goes_only_to_the_managed_daemon() {
+    // Nothing exported: the check reads the managed connection's daemon,
+    // as the hooks do, not the default loopback address.
+    let mut world = World::new();
+    without_registration(&world);
+    credential_step_before_registration(&mut world, None);
+    world.host.env.remove("PSEUDOLIFE_MCP_DAEMON_URL");
+    let report = world.run("manual", "yes", "auto").await;
+    assert_eq!(report.status, "ready", "{:?}", report.recovery);
+    assert_eq!(
+        *world.host.connected.borrow(),
+        Some((
+            "http://10.0.0.5:8765".to_owned(),
+            Some("fixture-installer-bearer".to_owned())
+        ))
+    );
+    // An exported URL naming another daemon is the mismatch the hooks
+    // refuse: the check refuses it too, before any request carries the
+    // bearer.
+    let mut world = World::new();
+    without_registration(&world);
+    credential_step_before_registration(&mut world, None);
+    world.host.env.insert(
+        "PSEUDOLIFE_MCP_DAEMON_URL".into(),
+        "http://10.0.0.6:8765".into(),
+    );
+    let report = world.run("manual", "yes", "auto").await;
+    assert_eq!(report.status, "unavailable");
+    let recovery = report.recovery.unwrap_or_default();
+    assert!(
+        recovery.contains("http://10.0.0.6:8765") && recovery.contains("mismatch"),
+        "{recovery}"
+    );
+    assert_eq!(*world.host.connected.borrow(), None);
+}
+
+#[tokio::test]
 async fn a_registered_token_file_outranks_the_managed_connection() {
     // A rerun: the registration names the token file, and the check uses it.
     let mut world = World::new();
@@ -1628,10 +1668,7 @@ async fn a_registered_token_file_outranks_the_managed_connection() {
     crate::board::state::atomic_create(&other, b"fixture-other-bearer\n").unwrap();
     crate::board::state::atomic_create(
         &crate::setup::codex::connection_path(&world.home),
-        &crate::setup::codex::connection_bytes(
-            "http://10.0.0.5:8765",
-            &other.to_string_lossy(),
-        ),
+        &crate::setup::codex::connection_bytes("http://10.0.0.5:8765", &other.to_string_lossy()),
     )
     .unwrap();
     world.host.env.insert(
@@ -1641,7 +1678,12 @@ async fn a_registered_token_file_outranks_the_managed_connection() {
     let report = world.run("manual", "yes", "auto").await;
     assert_eq!(report.status, "ready", "{:?}", report.recovery);
     assert_eq!(
-        world.host.connected.borrow().as_ref().map(|(_, t)| t.clone()),
+        world
+            .host
+            .connected
+            .borrow()
+            .as_ref()
+            .map(|(_, t)| t.clone()),
         Some(Some("fixture-installer-bearer".to_owned()))
     );
 }

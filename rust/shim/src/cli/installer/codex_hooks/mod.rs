@@ -334,6 +334,9 @@ fn connection(host: &impl Host, home: &Path, report: &Report) -> Result<Connecti
     let mut environment = Vec::new();
     let mut file = host.var(FILE_KEY).filter(|v| !v.is_empty());
     let mut literal = host.var(TOKEN_KEY).filter(|v| !v.is_empty());
+    // The managed connection, when the check falls back to it: its URL and
+    // whether it records a token file.
+    let mut managed: Option<(String, bool)> = None;
     if let Some(path) = report
         .credential
         .get("credential_file_path")
@@ -345,11 +348,14 @@ fn connection(host: &impl Host, home: &Path, report: &Report) -> Result<Connecti
         literal = None;
         file = match configured {
             Some(path) => Some(path),
-            None => crate::setup::codex::read_connection(&crate::setup::codex::connection_path(
-                home,
-            ))?
-            .map(|(_, token_file)| token_file)
-            .filter(|token_file| !token_file.is_empty()),
+            None => {
+                let recorded = crate::setup::codex::read_connection(
+                    &crate::setup::codex::connection_path(home),
+                )?;
+                let token_file = recorded.as_ref().map(|(_, t)| t.clone());
+                managed = recorded.map(|(url, token_file)| (url, !token_file.is_empty()));
+                token_file.filter(|v| !v.is_empty())
+            }
         };
     }
     let mut url = host.var(URL_KEY).filter(|v| !v.is_empty());
@@ -361,6 +367,24 @@ fn connection(host: &impl Host, home: &Path, report: &Report) -> Result<Connecti
     {
         url = Some(chosen.to_owned());
         environment.push((URL_KEY.to_owned(), url.clone()));
+    }
+    // The hooks' own rules for the managed connection: a tokenless one names
+    // the URL whatever is exported; with a token an exported URL must agree,
+    // or the hooks refuse it, and the bearer never goes to another daemon.
+    if let Some((recorded, has_token)) = managed.filter(|(u, _)| !u.is_empty()) {
+        match &url {
+            Some(exported)
+                if has_token
+                    && exported.trim_end_matches('/') != recorded.trim_end_matches('/') =>
+            {
+                return Err(Fail::detail(format!(
+                    "{URL_KEY} names {exported}, but Codex's managed connection ({}) names {recorded}, and the hooks refuse that mismatch. Rerun the installer with --daemon-url set to the daemon Codex should use.",
+                    crate::setup::codex::connection_path(home).display()
+                )));
+            }
+            Some(_) if has_token => {}
+            _ => url = Some(recorded),
+        }
     }
     let url = url.unwrap_or_else(|| crate::daemon_url::DEFAULT_URL.to_owned());
     let token = match file {
