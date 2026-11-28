@@ -22,7 +22,7 @@ use serde_json::{Map, Value, json};
 use crate::http::{App, json_response};
 use crate::read::cortex_search::{
     CortexKnobs, annotate_evidence_supersession, contender_fields, record_to_dict_age,
-    traces_for_slot,
+    traces_for_slots,
 };
 use crate::read::search_route::{list, py_float, py_int};
 use crate::service::{Ready, Service};
@@ -640,7 +640,7 @@ async fn active_roots(
 /// `source_entries` and the evidence-supersession flag.
 async fn facts_dump(svc: &Service, ready: &Ready) -> anyhow::Result<Vec<Value>> {
     // Python holds the service lock for the whole dump, so no write lands
-    // between the snapshot and the per-row trace reads.
+    // between the snapshot and the trace reads.
     let _ws = ready.write.lock().await;
     let knobs = CortexKnobs::from_config(&svc.config);
     let relative_age = svc.config.time.relative_age;
@@ -684,6 +684,18 @@ async fn facts_dump(svc: &Service, ready: &Ready) -> anyhow::Result<Vec<Value>> 
     }
     let db = ready.storage.client();
     let emap = crate::storage::graph::entity_id_map(db).await?;
+    // Keyed by each row's own spelling, as `traces_for_slot(_norm_key(
+    // entity), _norm_key(attribute))` is, and read for every row in one
+    // statement rather than one round trip per fact under the write lock.
+    let keys: Vec<SlotKey> = rows
+        .iter()
+        .map(|(d, _)| {
+            let text = |k: &str| d.get(k).and_then(Value::as_str).unwrap_or("");
+            (norm_key(text("entity")), norm_key(text("attribute")))
+        })
+        .collect();
+    let traces =
+        crate::txn::with_client(db, |c| async move { traces_for_slots(c, &keys).await }).await?;
     for (d, _) in &mut rows {
         let text = |k: &str| d.get(k).and_then(Value::as_str).unwrap_or("").to_string();
         let (entity, attribute) = (text("entity"), text("attribute"));
@@ -692,12 +704,9 @@ async fn facts_dump(svc: &Service, ready: &Ready) -> anyhow::Result<Vec<Value>> 
             .cloned()
             .unwrap_or(Value::Null);
         d.insert("entity_id".into(), id);
-        // Keyed by the row's own spelling, as `traces_for_slot(_norm_key(
-        // entity), _norm_key(attribute))` is.
         let key = (norm_key(&entity), norm_key(&attribute));
-        let traces =
-            crate::txn::with_client(db, |c| async move { traces_for_slot(c, &key).await }).await?;
-        d.insert("source_entries".into(), json!(traces));
+        let ids = traces.get(&key).map_or(&[][..], Vec::as_slice);
+        d.insert("source_entries".into(), json!(ids));
     }
     let mut maps: Vec<Map<String, Value>> = rows.into_iter().map(|(d, _)| d).collect();
     annotate_evidence_supersession(db, &mut maps, &knobs).await?;

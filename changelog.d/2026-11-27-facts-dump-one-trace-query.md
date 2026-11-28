@@ -1,0 +1,2 @@
+### Performance (2026-11-27 — the Console's facts list no longer stalls the daemon)
+- `GET /api/facts` and `/api/overview` read every fact's source entries in one query instead of one query per fact. The dump holds the daemon's write lock, which every search and write also waits on, so on a bank of thousands of facts each Console page load or review action no longer holds up memory calls for over a second. The output is unchanged.
