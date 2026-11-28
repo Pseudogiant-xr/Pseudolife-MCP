@@ -48,7 +48,7 @@ At the audit baseline, the following are implemented, rather than new work:
 
 | Surface | Evidence to start from | Remaining distinction |
 |---|---|---|
-| Rust Docker daemon and model provisioning | `ops/Dockerfile.daemon-rust`, `rust/daemon/src/` | Its final image has no Python; the ONNX wheel-extraction build stage may still use Python. |
+| Rust Docker daemon and model provisioning | `ops/Dockerfile.daemon-rust`, `rust/daemon/src/` | No stage uses Python: the ONNX Runtime library is unzipped from its hash-checked PyPI wheel in a Debian stage. |
 | Native archives and compose bundle before PyPI | `.github/workflows/release.yml`, [release-assets.md](release-assets.md) | Workflow implementation and a build-only dispatch are distinct from published, downloadable assets. |
 | Windows board registration, hook-marker ownership and updater handoff fixes | Landings #1536, #1544, #1549, #1535; `rust/shim/tests/update_client_handoff.rs` | Reuse their regressions; do not reopen the original ports from stale CUTOVER prose. |
 | Docker backup, destructive restore, conductor-watch | `rust/shim/src/cli/backup/`, `restore_cli/`, `conductor_watch/` | Exercise installed binaries and recovery, rather than reimplementing these commands. |

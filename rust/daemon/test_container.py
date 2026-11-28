@@ -207,8 +207,7 @@ class ContainerTests(unittest.TestCase):
 
     def test_runtime_contract_is_explicit_and_default_compose_is_not_used(self):
         dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text(encoding="utf-8")
-        for item in ("USER root", 'EXPOSE 8765', 'VOLUME ["/data"]',
-                     "HF_HUB_OFFLINE=1", "CUDA_VISIBLE_DEVICES=-1", "ORT_DYLIB_PATH=",
+        for item in ("USER root", 'EXPOSE 8765', 'VOLUME ["/data"]', "ORT_DYLIB_PATH=",
                      "PSEUDOLIFE_DAEMON_ONNX_DIR=", "HEALTHCHECK", "--locked", "-j 3",
                      "provision pdfium", "COPY --from=builder /opt/pdfium /opt/pdfium",
                      "PSEUDOLIFE_DAEMON_PDFIUM_DIR=/opt/pdfium"):

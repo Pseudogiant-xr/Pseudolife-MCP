@@ -12,21 +12,30 @@
 # evlora campaign (evals/results/evlora-verdict.json). Evals and
 # provenance: https://huggingface.co/Pseudogiant-xr/pseudolife-extractor-gemma-4-e4b
 # Bake the lighter Gemma 4 E2B QAT (~2.44GB, ladder-verified base model)
-# instead on constrained machines with:
-#   --build-arg MODEL_URL=https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf
+# instead on constrained machines with both build args:
+#   --build-arg MODEL_URL=https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/66a399f68ddd113b06dff02fca9523e55465d11d/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf
+#   --build-arg MODEL_SHA256=e531007218dfab990486a5de7676a6932d6ea8dea233d1f698d7c21cf8a16889
 # Or, for the benchmark, leave the baked default and mount a different GGUF over
 # /models/extractor.gguf at run time (see ops/docker-compose.yml).
 
-ARG MODEL_URL=https://huggingface.co/Pseudogiant-xr/pseudolife-extractor-gemma-4-e4b/resolve/main/pseudolife-extractor-e4b-v3-Q4_K_M.gguf
+#
+# Every input is pinned: the model by repository revision plus its SHA-256
+# (the Hugging Face LFS hash, which the build checks), and both base images by
+# digest. Bump a pin deliberately and together with its hash or digest.
+ARG MODEL_URL=https://huggingface.co/Pseudogiant-xr/pseudolife-extractor-gemma-4-e4b/resolve/71a25593469b1cbd1aacf1a299df58b3b37c8946/pseudolife-extractor-e4b-v3-Q4_K_M.gguf
+ARG MODEL_SHA256=3d5930dd81308fadd4f461437d353abacce9c161d9e1dbb70d14c54c1e575980
 
-# Stage 1 — fetch the GGUF with a curl-equipped image (the llama.cpp server
-# image is minimal and may lack curl/wget).
-FROM curlimages/curl:latest AS fetch
+# Stage 1 — fetch and verify the GGUF with a curl-equipped image (the
+# llama.cpp server image is minimal and may lack curl/wget).
+FROM curlimages/curl:8.23.0@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93 AS fetch
 ARG MODEL_URL
-RUN curl -fSL --retry 3 --retry-delay 5 "$MODEL_URL" -o /tmp/extractor.gguf
+ARG MODEL_SHA256
+RUN curl -fSL --retry 3 --retry-delay 5 "$MODEL_URL" -o /tmp/extractor.gguf \
+    && { echo "${MODEL_SHA256}  /tmp/extractor.gguf" | sha256sum -c - \
+         || { echo "the GGUF does not match MODEL_SHA256: pass --build-arg MODEL_SHA256=<its sha256> with MODEL_URL" >&2; exit 1; }; }
 
 # Stage 2 — the OpenAI-compatible CPU server with the model baked in.
-FROM ghcr.io/ggml-org/llama.cpp:server
+FROM ghcr.io/ggml-org/llama.cpp:server-b12767@sha256:b24873ae66a4732e0b4b66dd7dc658066ccad6e8c63524278e92eebc767aacbe
 COPY --from=fetch /tmp/extractor.gguf /models/extractor.gguf
 EXPOSE 8081
 # llama-server is the image ENTRYPOINT; these are its args. --jinja enables the

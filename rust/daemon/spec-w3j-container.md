@@ -125,8 +125,8 @@ rejects redirects to HTTP as well as initial HTTP URLs. SHA256 remains the
 integrity check, including for restored caches.
 
 The explicit native provision command uses HTTPS directly, independent of
-the Python-library flags `HF_HUB_OFFLINE` and `TRANSFORMERS_OFFLINE`. Those
-flags can remain set in the image. Network isolation is tested with Docker
+the Python-library flags `HF_HUB_OFFLINE` and `TRANSFORMERS_OFFLINE`, which
+the image no longer sets because nothing in it reads them. Network isolation is tested with Docker
 `--network none`, not inferred from environment flags.
 
 ### Correctness evidence and limits

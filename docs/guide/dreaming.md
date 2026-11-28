@@ -330,8 +330,9 @@ The default bake is the bespoke
 (Gemma 4 E4B QLoRA — the v3 bake is multi-task, claims + dated events;
 the v2 claims-only GGUF stays published on the same repo for rollback);
 constrained machines can bake the lighter **Gemma 4
-E2B QAT** instead (also ladder-verified) — see the `MODEL_URL` build-arg in
-`ops/Dockerfile.extractor`, or mount any GGUF over `/models/extractor.gguf`
+E2B QAT** instead (also ladder-verified) — see the `MODEL_URL` and
+`MODEL_SHA256` build-args in `ops/Dockerfile.extractor` (the build checks the
+GGUF against that hash, so a different model needs both), or mount any GGUF over `/models/extractor.gguf`
 via a machine-local `ops/docker-compose.override.yml` (gitignored; example
 in the compose file). If you run the daemon *outside* Docker (embedded
 stdio mode), the `$env:` variables above apply directly and `localhost`
