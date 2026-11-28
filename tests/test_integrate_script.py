@@ -4835,7 +4835,7 @@ def test_harness_environment_cleanup_refuses_an_active_process(tmp_path, alias):
 
 
 _PROC_SCAN_PROBE = r'''
-param($source, $path, $root, $vanishes, $unreadable)
+param($source, $environment, $root, $reads)
 $ErrorActionPreference = 'Stop'
 $tokens = $null
 $errors = $null
@@ -4845,63 +4845,65 @@ $definition = $ast.Find({ param($node)
     $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Find-HarnessProcPathUser'
 }, $true)
 . ([scriptblock]::Create($definition.Extent.Text))
+# The Nth cmdline read behaves as the Nth entry of $reads, whatever order the
+# directory listing yields, so a scan that stops early cannot pass.
+$script:plan = @($reads -split ',')
+$script:seen = [Collections.Generic.List[string]]::new()
 function Read-HarnessProcCommandLine([string] $Path) {
     $processDir = [IO.Path]::GetDirectoryName($Path)
-    $processNumber = [IO.Path]::GetFileName($processDir)
-    $gone = $processNumber -in ($vanishes -split ',')
-    if ($gone -or $processNumber -in ($unreadable -split ',')) {
-        if ($gone) { [IO.Directory]::Delete($processDir, $true) }
+    $script:seen.Add([IO.Path]::GetFileName($processDir))
+    $kind = $script:plan[$script:seen.Count - 1]
+    if ($kind -eq 'vanishes') { [IO.Directory]::Delete($processDir, $true) }
+    if ($kind -in 'vanishes', 'unreadable') {
         # Thrown from a .NET call, so it arrives wrapped as ReadAllBytes' does.
         [Runtime.ExceptionServices.ExceptionDispatchInfo]::Throw([IO.IOException]::new("No such process : '$Path'", 3))
     }
-    [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($Path))
+    if ($kind -eq 'user') { return "$environment/bin/python`0-m`0pytest`0" }
+    "/usr/bin/python`0-c`0pass`0"
 }
-$user = Find-HarnessProcPathUser -EnvironmentPath $path -ProcRoot $root
+$user = Find-HarnessProcPathUser -EnvironmentPath $environment -ProcRoot $root
 "user=$user"
+"reads=$($script:seen -join ',')"
 '''
 
 
-def _proc_scan_probe(tmp_path, environment, processes):
+def _proc_scan_probe(tmp_path, environment, reads):
     """Run the real /proc scan over a stand-in proc root.
 
-    `processes` maps a PID to its argv text, to "vanishes" (the process exits
-    after the listing: its directory goes and the read fails with ESRCH, as
-    Linux reports it) or to "unreadable" (the read fails while it is listed).
+    `reads` gives, in read order, how each process's cmdline read behaves:
+    "vanishes" (the process is reaped after the listing: its directory goes
+    and the read fails with ESRCH, as Linux reports it), "unreadable" (the
+    read fails while it is still listed), "user" (its argv names the
+    environment) or "other".
     """
     root = tmp_path / "proc"
     root.mkdir()
     (root / "self").mkdir()
-    for pid, command in processes.items():
-        (root / str(pid)).mkdir()
-        if command not in ("vanishes", "unreadable"):
-            (root / str(pid) / "cmdline").write_bytes(command.encode() + b"\0")
+    for n in range(len(reads)):
+        (root / str(900000001 + n)).mkdir()
     script = tmp_path / "proc-scan-probe.ps1"
     script.write_text(_PROC_SCAN_PROBE, encoding="utf-8")
-    pick = lambda kind: ",".join(str(pid) for pid, c in processes.items() if c == kind)  # noqa: E731
-    return subprocess.run([_PWSH, "-NoProfile", "-NonInteractive", "-File", str(script),
-                           str(ROOT / "ops/rust-harness-remote.ps1"), environment, str(root),
-                           pick("vanishes"), pick("unreadable")],
-                          capture_output=True, text=True, timeout=45)
+    run = subprocess.run([_PWSH, "-NoProfile", "-NonInteractive", "-File", str(script),
+                          str(ROOT / "ops/rust-harness-remote.ps1"), environment, str(root),
+                          ",".join(reads)],
+                         capture_output=True, text=True, timeout=45)
+    lines = dict(line.split("=", 1) for line in run.stdout.splitlines() if "=" in line)
+    return run, lines.get("user"), [r for r in lines.get("reads", "").split(",") if r]
 
 
 @needs_pwsh
-@pytest.mark.parametrize("case", ["vanished", "vanished-then-user", "user", "unreadable-while-listed"])
-def test_harness_proc_scan_treats_a_vanished_process_as_gone_and_still_refuses_a_live_user(tmp_path, case):
+@pytest.mark.parametrize("reads", [("vanishes", "other"), ("vanishes", "user"), ("user",),
+                                   ("unreadable",)], ids="-then-".join)
+def test_harness_proc_scan_treats_a_vanished_process_as_gone_and_still_refuses_a_live_user(tmp_path, reads):
     environment = f"/srv/repo.rust-harness-env-{'a' * 32}"
-    processes = {
-        "vanished": {900000001: "vanishes", 900000002: "/usr/bin/python -c pass"},
-        "vanished-then-user": {900000001: "vanishes", 900000002: f"{environment}/bin/python -m pytest"},
-        "user": {900000002: f"{environment}/bin/python -m pytest"},
-        "unreadable-while-listed": {900000003: "unreadable"},
-    }[case]
-    run = _proc_scan_probe(tmp_path, environment, processes)
-    if case == "vanished":
-        assert run.returncode == 0 and run.stdout.strip() == "user=", run.stdout + run.stderr
-    elif case == "unreadable-while-listed":
+    run, user, seen = _proc_scan_probe(tmp_path, environment, reads)
+    if "unreadable" in reads:
         # Only a process whose directory is gone counts as gone.
         assert run.returncode != 0 and "No such process" in run.stderr, run.stdout + run.stderr
-    else:
-        assert run.returncode == 0 and run.stdout.strip() == "user=900000002", run.stdout + run.stderr
+        return
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert len(seen) == len(reads), run.stdout
+    assert user == (seen[-1] if reads[-1] == "user" else ""), run.stdout
 
 
 @needs_pwsh
