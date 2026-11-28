@@ -263,6 +263,344 @@ pub fn check_path(path: &Path) -> Result<(), Refusal> {
     Walk::default().walk(path)
 }
 
+/// [`check_ancestors`] for a client's own config file (the maintainer's
+/// ruling on #2032): on Linux a link in a folder only its group may also
+/// write is trusted when that group is the user's own private group (as
+/// umask 002 leaves `~/.config` on user-private-group systems), because no
+/// other account is in it. Elsewhere it is the plain rule.
+pub fn check_client_config_ancestors(path: &Path) -> Result<(), Refusal> {
+    #[cfg(unix)]
+    {
+        check_ancestors_with(path, Accounts::system())
+    }
+    #[cfg(not(unix))]
+    {
+        check_ancestors(path)
+    }
+}
+
+#[cfg(unix)]
+pub(crate) fn check_ancestors_with(path: &Path, accounts: Accounts) -> Result<(), Refusal> {
+    match path.parent() {
+        Some(parent) => Walk {
+            accounts: Some(accounts),
+            ..Walk::default()
+        }
+        .walk(parent),
+        None => Ok(()),
+    }
+}
+
+/// The local account files, read to tell a user's private group from a
+/// shared one. An account they do not list (one from LDAP, say) is never
+/// taken for a private group, and nor is any group while the system may
+/// also take accounts or groups from a source those files do not show
+/// (`nsswitch.conf`, systemd's userdb services), so its folders keep the
+/// plain rule.
+/// `/etc/gshadow` is readable only by root and is not consulted.
+#[cfg(unix)]
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Accounts {
+    passwd: String,
+    group: String,
+    /// `passwd`, `group` and `initgroups` come only from these files.
+    files_only: bool,
+}
+
+/// Whether `nsswitch.conf` takes `passwd`, `group` and `initgroups` only from
+/// the local files. `files` counts, and `systemd` only when
+/// `systemd_local` says its userdb serves nothing beyond them (see
+/// [`Accounts::under`]); anything else, `compat`'s NIS `+`/`-` lines
+/// included, does not. Both `passwd` and `group` must be named, each line
+/// with `files` in it (one with no source is glibc's default, unread);
+/// `initgroups` falls back to `group`. As glibc does, a database name ends
+/// at whitespace or `:`, case aside.
+#[cfg(unix)]
+pub(crate) fn nss_files_only(nsswitch: &str, systemd_local: bool) -> bool {
+    let (mut passwd, mut group) = (false, false);
+    let local = nsswitch.lines().all(|line| {
+        let line = line.split('#').next().unwrap_or("").trim_start();
+        let end = line
+            .find(|c: char| c.is_whitespace() || c == ':')
+            .unwrap_or(line.len());
+        let (database, sources) = line.split_at(end);
+        let sources = sources.trim_start_matches(|c: char| c.is_whitespace() || c == ':');
+        match database.to_ascii_lowercase().as_str() {
+            "passwd" => passwd = true,
+            "group" => group = true,
+            // `initgroups` can add supplementary groups on its own.
+            "initgroups" => {}
+            _ => return true,
+        }
+        // A `[...]` action group is skipped only when its brackets stand
+        // alone; a service name glued to one (`[...]sss`) fails.
+        let mut in_action = false;
+        let mut files = false;
+        sources.split_whitespace().all(|word| {
+            if in_action || word.starts_with('[') {
+                match word.find(']') {
+                    Some(end) if end + 1 == word.len() => in_action = false,
+                    Some(_) => return false,
+                    None => in_action = true,
+                }
+                return true;
+            }
+            files |= word == "files";
+            word == "files" || (systemd_local && word == "systemd")
+        }) && !in_action
+            && files
+    });
+    local && passwd && group
+}
+
+/// The colon-separated records of an account file, or `None` when any line
+/// that is not blank or a comment does not have `width` fields or is a
+/// compat `+`/`-` reference to another source. (glibc skips leading
+/// whitespace, which this reader keeps: such a name never matches the
+/// user's, so the line can only make a group look less private.)
+#[cfg(unix)]
+fn records(text: &str, width: usize) -> Option<Vec<Vec<&str>>> {
+    let mut rows = Vec::new();
+    for line in text.lines() {
+        let content = line.trim_start();
+        if content.is_empty() || content.starts_with('#') {
+            continue;
+        }
+        if line.starts_with(['+', '-']) {
+            return None;
+        }
+        let fields: Vec<&str> = line.split(':').collect();
+        if fields.len() != width {
+            return None;
+        }
+        rows.push(fields);
+    }
+    Some(rows)
+}
+
+/// A numeric id field. glibc's `strtoul` also reads ` 1000` or `-1`, which
+/// this parse does not, so the caller treats `None` as not private, never
+/// as a line to skip.
+#[cfg(unix)]
+fn numeric_id(field: &str) -> Option<u32> {
+    field.parse().ok()
+}
+
+/// The folders systemd's userdb reads drop-in records from (`*.user`,
+/// `*.group`, `*.membership`), relative to the root.
+#[cfg(unix)]
+const USERDB_DIRS: [&str; 5] = [
+    "etc/userdb",
+    "run/userdb",
+    "run/host/userdb",
+    "usr/lib/userdb",
+    "usr/local/lib/userdb",
+];
+
+/// The varlink services in `/run/systemd/userdb` that add no account,
+/// group or membership the local files lack, while no drop-in record exists:
+/// PID 1's `DynamicUser` (ids from [`SYSTEMD_RANGES`] only, no memberships),
+/// and systemd-userdbd's `Multiplexer`, `NameServiceSwitch` (which
+/// nss-systemd skips, and which serves glibc's own NSS records) and `DropIn`
+/// (the drop-in records). Any other service (`io.systemd.Home`,
+/// `io.systemd.Machine`, `io.systemd.NamespaceResource`, one unknown) may.
+#[cfg(unix)]
+const SYSTEMD_LOCAL_SERVICES: [&str; 4] = [
+    "io.systemd.DynamicUser",
+    "io.systemd.Multiplexer",
+    "io.systemd.NameServiceSwitch",
+    "io.systemd.DropIn",
+];
+
+/// Ids systemd hands out or synthesizes itself, never a user's private
+/// group here (systemd's `docs/UIDS-GIDS.md`; real user-private-group ids
+/// sit below 60000): `DynamicUser=` (61184-65519); `nobody` (65534, which
+/// nss-systemd synthesizes as a primary group when `/etc/passwd` lacks it)
+/// and 65535; containers (0x80000-0x6FFFFFFF: `--private-users=pick` checks
+/// only a range's base); systemd-nsresourced (0x70000000-0x7FFDFFFF); and
+/// the foreign range (0x7FFE0000-0x7FFEFFFF).
+#[cfg(unix)]
+const SYSTEMD_RANGES: [std::ops::RangeInclusive<u32>; 5] = [
+    61184..=65519,
+    65534..=65535,
+    0x0008_0000..=0x6FFF_FFFF,
+    0x7000_0000..=0x7FFD_FFFF,
+    0x7FFE_0000..=0x7FFE_FFFF,
+];
+
+/// Where glibc may read `nsswitch.conf`, relative to the root: openSUSE's
+/// glibc falls back to `/usr/etc` when `/etc` has none.
+#[cfg(unix)]
+const NSSWITCH_FILES: [&str; 2] = ["usr/etc/nsswitch.conf", "etc/nsswitch.conf"];
+
+#[cfg(unix)]
+impl Accounts {
+    pub(crate) fn system() -> Self {
+        Self::under(Path::new("/"))
+    }
+
+    /// The account files under `root` (`/` but in tests). Files-only needs
+    /// at least one `nsswitch.conf`, every one that exists files-only (a
+    /// missing one is glibc's built-in default, not read here, so it fails
+    /// closed), and no userdb drop-in record at all.
+    ///
+    /// `systemd` there counts as the files only while `/run/systemd/userdb`
+    /// holds nothing but [`SYSTEMD_LOCAL_SERVICES`]; an unreadable folder
+    /// does not count. nss-systemd finds its services by listing that folder
+    /// and treats a missing one as no service at all, which leaves only the
+    /// drop-ins (refused here) and the `root`, `nobody` and foreign groups it
+    /// synthesizes, which have no members.
+    pub(crate) fn under(root: &Path) -> Self {
+        let userdb = USERDB_DIRS
+            .iter()
+            .any(|dir| match std::fs::read_dir(root.join(dir)) {
+                Ok(mut entries) => entries.next().is_some(),
+                Err(error) => error.kind() != io::ErrorKind::NotFound,
+            });
+        // A drop-in record already makes it not files-only (below).
+        let systemd_local = match std::fs::read_dir(root.join("run/systemd/userdb")) {
+            Ok(mut entries) => entries.all(|entry| {
+                entry.is_ok_and(|entry| {
+                    SYSTEMD_LOCAL_SERVICES
+                        .iter()
+                        .any(|service| entry.file_name() == *service)
+                })
+            }),
+            // No folder: nss-systemd has no service to ask.
+            Err(error) => error.kind() == io::ErrorKind::NotFound,
+        };
+        let mut found = false;
+        let nsswitch_local =
+            NSSWITCH_FILES
+                .iter()
+                .all(|file| match std::fs::read_to_string(root.join(file)) {
+                    Ok(text) => {
+                        found = true;
+                        nss_files_only(&text, systemd_local)
+                    }
+                    Err(error) => error.kind() == io::ErrorKind::NotFound,
+                });
+        Self {
+            passwd: std::fs::read_to_string(root.join("etc/passwd")).unwrap_or_default(),
+            group: std::fs::read_to_string(root.join("etc/group")).unwrap_or_default(),
+            files_only: found && nsswitch_local && !userdb,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_text(passwd: &str, group: &str) -> Self {
+        Self::from_files(passwd, group, "passwd: files\ngroup: files\n")
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_files(passwd: &str, group: &str, nsswitch: &str) -> Self {
+        Self {
+            passwd: passwd.to_owned(),
+            group: group.to_owned(),
+            files_only: nss_files_only(nsswitch, false),
+        }
+    }
+
+    /// `gid` is `uid`'s private group: its primary group, named as the
+    /// user is, with no other member, and no other account's primary group.
+    /// Any record line that does not read cleanly makes it not private.
+    pub(crate) fn private_group(&self, uid: u32, gid: u32) -> bool {
+        if !self.files_only || SYSTEMD_RANGES.iter().any(|range| range.contains(&gid)) {
+            return false;
+        }
+        let (Some(passwd), Some(group)) = (records(&self.passwd, 7), records(&self.group, 4))
+        else {
+            return false;
+        };
+        let mut users = Vec::new();
+        for fields in &passwd {
+            let (Some(id), Some(primary)) = (numeric_id(fields[2]), numeric_id(fields[3])) else {
+                return false;
+            };
+            users.push((fields[0], id, primary));
+        }
+        let Some(&(name, _, primary)) = users.iter().find(|(_, id, _)| *id == uid) else {
+            return false;
+        };
+        if primary != gid
+            || users
+                .iter()
+                .any(|(other, id, group)| *group == gid && (*id != uid || *other != name))
+        {
+            return false;
+        }
+        // Every entry for the gid, not only the first: a second one with
+        // another name or members makes it shared.
+        let mut entries = Vec::new();
+        for fields in &group {
+            let Some(id) = numeric_id(fields[2]) else {
+                return false;
+            };
+            if id == gid {
+                entries.push((fields[0], fields[1], fields[3]));
+            }
+        }
+        // A group password lets anyone who knows it join with newgrp: only
+        // a locked or shadowed field (`x`, `!`, `*`, empty) counts. What
+        // `/etc/gshadow` holds behind `x` (readable only by root) only root
+        // can set, and root is not another account this rule guards against.
+        !entries.is_empty()
+            && entries.iter().all(|(group, password, members)| {
+                matches!(*password, "x" | "!" | "*" | "")
+                    && *group == name
+                    && members
+                        .split(',')
+                        .map(str::trim)
+                        .all(|member| member.is_empty() || member == name)
+            })
+    }
+}
+
+/// The folder is on a local filesystem whose gids are this host's own: a
+/// network or FUSE filesystem may map them differently, so it fails.
+#[cfg(target_os = "linux")]
+pub(crate) fn on_local_filesystem(path: &Path) -> bool {
+    // ext2/3/4, xfs, btrfs, tmpfs, f2fs, zfs, bcachefs, overlayfs.
+    const LOCAL: [i64; 8] = [
+        0xEF53,
+        0x5846_5342,
+        0x9123_683E,
+        0x0102_1994,
+        0xF2F5_2010,
+        0x2FC1_2FC1,
+        0xCA45_1A4E,
+        0x794C_7630,
+    ];
+    // `f_type`'s width differs between targets.
+    #[allow(clippy::unnecessary_cast)]
+    rustix::fs::statfs(path).is_ok_and(|fs| LOCAL.contains(&(fs.f_type as i64)))
+}
+
+/// No ACL on `path` that could let another account write: with a POSIX
+/// access ACL the mode's group bits are only its mask.
+#[cfg(target_os = "linux")]
+fn without_access_acl(path: &Path) -> bool {
+    // A zero-length read returns the attribute's size without its value.
+    let mut empty: [u8; 0] = [];
+    acls_allow(
+        rustix::fs::getxattr(path, "system.posix_acl_access", &mut empty[..]),
+        rustix::fs::getxattr(path, "system.nfs4_acl", &mut empty[..]),
+    )
+}
+
+/// What the two ACL reads must say: only a filesystem that supports POSIX
+/// ACLs and reports none passes (one that does not support them is unknown,
+/// so it fails), and an NFSv4 ACL fails too; any other error fails.
+#[cfg(target_os = "linux")]
+pub(crate) fn acls_allow(
+    posix: rustix::io::Result<usize>,
+    nfs4: rustix::io::Result<usize>,
+) -> bool {
+    use rustix::io::Errno;
+    matches!(posix, Ok(0) | Err(Errno::NODATA))
+        && matches!(nfs4, Ok(0) | Err(Errno::NODATA | Errno::NOTSUP))
+}
+
 /// How many distinct links [`check_ancestors`] follows for `path`: for the
 /// tests that each link costs one against [`MAX_LINKS`], however it is
 /// spelled when the walk meets it.
@@ -345,6 +683,9 @@ struct Walk {
     accepted: HashSet<LinkKey>,
     resolving: HashSet<LinkKey>,
     links: usize,
+    /// Set for a client config: a user's private group is no other account.
+    #[cfg(unix)]
+    accounts: Option<Accounts>,
 }
 
 type LinkKey = ((u64, u64), PathBuf);
@@ -373,7 +714,11 @@ impl Walk {
                 cause: Box::new(cause),
             })
         };
-        match inspect(prefix) {
+        #[cfg(unix)]
+        let inspected = inspect(prefix, self.accounts.as_ref());
+        #[cfg(not(unix))]
+        let inspected = inspect(prefix);
+        match inspected {
             Ok(Entry::Plain) => Ok(()),
             Ok(Entry::Link {
                 target,
@@ -433,7 +778,7 @@ enum Entry {
 }
 
 #[cfg(unix)]
-fn inspect(path: &Path) -> io::Result<Entry> {
+fn inspect(path: &Path, accounts: Option<&Accounts>) -> io::Result<Entry> {
     use std::os::unix::fs::MetadataExt;
     let meta = match std::fs::symlink_metadata(path) {
         Ok(meta) => meta,
@@ -453,26 +798,44 @@ fn inspect(path: &Path) -> io::Result<Entry> {
     let holder = std::fs::metadata(holder_path)?;
     let me = rustix::process::geteuid().as_raw();
     let shown = target.clone();
-    let distrust =
-        posix_link_cause(me, meta.uid(), holder.uid(), holder.mode()).map(
-            |distrust| match distrust {
-                PosixDistrust::LinkOwner(owner) => Cause::LinkOwner {
-                    owner: account_name(owner),
-                    target: shown,
-                },
-                PosixDistrust::HolderOwner(owner) => Cause::HolderOwner {
-                    holder: holder_path.to_path_buf(),
-                    owner: account_name(owner),
-                    target: shown,
-                },
-                PosixDistrust::HolderWritable(writer) => Cause::HolderWritable {
-                    holder: holder_path.to_path_buf(),
-                    writer,
-                    owned: holder.uid() == me,
-                    target: shown,
-                },
+    // Linux only: there the ACL can be read, and elsewhere (macOS) the
+    // primary group is the shared `staff` anyway.
+    let private_group = |gid: u32| {
+        cfg!(target_os = "linux")
+            && accounts.is_some_and(|accounts| accounts.private_group(me, gid))
+            && {
+                #[cfg(target_os = "linux")]
+                {
+                    on_local_filesystem(holder_path) && without_access_acl(holder_path)
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    false
+                }
+            }
+    };
+    let distrust = posix_link_cause(me, meta.uid(), holder.uid(), holder.mode())
+        .filter(|distrust| {
+            *distrust != PosixDistrust::HolderWritable(Writer::Group)
+                || !private_group(holder.gid())
+        })
+        .map(|distrust| match distrust {
+            PosixDistrust::LinkOwner(owner) => Cause::LinkOwner {
+                owner: account_name(owner),
+                target: shown,
             },
-        );
+            PosixDistrust::HolderOwner(owner) => Cause::HolderOwner {
+                holder: holder_path.to_path_buf(),
+                owner: account_name(owner),
+                target: shown,
+            },
+            PosixDistrust::HolderWritable(writer) => Cause::HolderWritable {
+                holder: holder_path.to_path_buf(),
+                writer,
+                owned: holder.uid() == me,
+                target: shown,
+            },
+        });
     Ok(Entry::Link {
         target,
         distrust,

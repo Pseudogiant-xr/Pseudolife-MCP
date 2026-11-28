@@ -300,6 +300,101 @@ mod modes {
     }
 }
 
+/// The `private_path` rule for the folders on the way, as the path names
+/// them: a link there is followed only when no other account can change it.
+#[cfg(unix)]
+mod links {
+    use super::*;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    fn private(path: &Path) {
+        fs::create_dir(path).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    #[test]
+    fn a_linked_folder_another_account_can_change_is_refused_before_resolving() {
+        let f = Fixture::new();
+        let real = f.0.join("real");
+        let shared = f.0.join("shared");
+        private(&real);
+        private(&shared);
+        fs::write(real.join("client.json"), b"before").unwrap();
+        symlink(&real, shared.join("config")).unwrap();
+        // Any account may now swap `config` for a link of its own.
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o777)).unwrap();
+        let result = write_config(&shared.join("config/client.json"), b"before", b"after");
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o700)).unwrap();
+        // The refusal names the link, the folder and the fix.
+        let error = result.unwrap_err();
+        assert!(
+            error.contains(&shared.join("config").display().to_string()),
+            "{error}"
+        );
+        assert!(
+            error.contains(&format!("fix: chmod go-w '{}'", shared.display())),
+            "{error}"
+        );
+        assert_eq!(fs::read(real.join("client.json")).unwrap(), b"before");
+        assert_eq!(fs::read_dir(&real).unwrap().count(), 1, "no backup written");
+    }
+
+    #[test]
+    fn a_linked_config_file_is_checked_along_its_own_links_too() {
+        let f = Fixture::new();
+        let real = f.0.join("real");
+        let shared = f.0.join("shared");
+        private(&real);
+        private(&shared);
+        fs::write(real.join("client.json"), b"before").unwrap();
+        symlink(&real, shared.join("dir")).unwrap();
+        // The config is the user's own link, into a folder reached through a
+        // link another account could swap.
+        // A relative target, resolved against the link's own folder.
+        let link = f.0.join("client.json");
+        symlink("shared/dir/client.json", &link).unwrap();
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o777)).unwrap();
+        let result = write_config(&link, b"before", b"after");
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o700)).unwrap();
+        let error = result.unwrap_err();
+        assert!(
+            error.contains(&shared.join("dir").display().to_string()),
+            "{error}"
+        );
+        assert!(
+            error.contains(&format!("fix: chmod go-w '{}'", shared.display())),
+            "{error}"
+        );
+        assert_eq!(fs::read(real.join("client.json")).unwrap(), b"before");
+    }
+
+    #[test]
+    fn the_users_own_linked_folder_and_linked_file_are_still_edited() {
+        let f = Fixture::new();
+        let real = f.0.join("real");
+        private(&real);
+        fs::write(real.join("client.json"), b"before").unwrap();
+        // A config folder behind the user's own link.
+        symlink(&real, f.0.join("config")).unwrap();
+        write_config(&f.0.join("config/client.json"), b"before", b"after").unwrap();
+        assert_eq!(fs::read(real.join("client.json")).unwrap(), b"after");
+        // A config file that is itself a link into the user's dotfiles.
+        let dotfiles = f.0.join("dotfiles");
+        private(&dotfiles);
+        fs::write(dotfiles.join("client.json"), b"one").unwrap();
+        let link = f.0.join("client.json");
+        symlink(dotfiles.join("client.json"), &link).unwrap();
+        write_config(&link, b"one", b"two").unwrap();
+        assert_eq!(fs::read(dotfiles.join("client.json")).unwrap(), b"two");
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+    }
+}
+
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod windows {
