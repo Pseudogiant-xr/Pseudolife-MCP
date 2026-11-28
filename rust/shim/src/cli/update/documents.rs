@@ -279,7 +279,7 @@ pub(crate) fn fix_owner_with(
     ))
 }
 
-/// [`fix_owner_with`] for this process's user, reading the folder's owner
+/// `fix_owner_with` (Unix only) for this process's user, reading the folder's owner
 /// without following a link. Windows has nothing to repair: Docker Desktop
 /// creates the folder as the user.
 pub(crate) fn fix_owner(
