@@ -410,6 +410,10 @@ python ops/integrate.py open --suite <suite.json> --harness <harness.json> --shi
 python ops/integrate.py merge   # once its CI is green and it has its review
 ```
 
+A conductor passes the members it intends to `build` (`build --expect
+<PR,PR...>`), because without it a build that leaves one out or takes in
+another still succeeds and gates the wrong set.
+
 - **`status`** lists the labelled pull requests in batch order, each with
   whether its head merges cleanly into master (`git merge-tree`, no working
   tree touched), its CI on that head and its review decision. It also names
