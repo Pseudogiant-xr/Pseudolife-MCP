@@ -196,14 +196,30 @@ fn python_strip(text: &str) -> &str {
     text.trim_matches(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
 }
 
+/// How `pg_dump` reaches the bank `dsn` names: on Unix the password goes
+/// through its environment, which only this account can read, never its
+/// argv, which every account can. An `Err` is the reason and its fix.
+pub(super) fn connection(dsn: &str) -> Result<super::private::Connection, String> {
+    let pgservice = std::env::var_os("PGSERVICE").is_some_and(|value| !value.is_empty());
+    super::private::pg_dump_connection(dsn, pgservice)
+}
+
 /// Stream `pg_dump --no-owner --no-acl` through gzip into `<ts>.sql.gz`.
 pub(super) fn write(dsn: &str, pg_dump: &Path, bdir: &Path, ts: &str) -> Result<PathBuf, String> {
     let target = super::args::join(bdir, &format!("{}{ts}.sql.gz", super::DUMP_PREFIX));
-    let partial = super::args::join(bdir, &format!("{}{ts}.sql.gz.part", super::DUMP_PREFIX));
+    let partial = super::private::partial_path(&target);
+    let connection = connection(dsn).map_err(|reason| format!("{reason} No backup was written"))?;
+    let mut command = Command::new(pg_dump);
+    command.args(["--no-owner", "--no-acl"]);
+    if let Some(dbname) = &connection.dbname {
+        command.args(["--dbname", dbname]);
+    }
+    if let Some(password) = connection.password {
+        command.env("PGPASSWORD", password);
+    }
     // Python starts pg_dump before its cleanup scope: a spawn failure leaves
     // any existing partial file alone.
-    let mut child = Command::new(pg_dump)
-        .args(["--no-owner", "--no-acl", "--dbname", dsn])
+    let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -216,7 +232,7 @@ pub(super) fn write(dsn: &str, pg_dump: &Path, bdir: &Path, ts: &str) -> Result<
         bytes
     });
     let copied = (|| -> io::Result<()> {
-        let mut gz = GzEncoder::new(fs::File::create(&partial)?, Compression::best());
+        let mut gz = GzEncoder::new(super::private::create_file(&partial)?, Compression::best());
         io::copy(&mut stdout, &mut gz)?;
         gz.finish()?;
         Ok(())

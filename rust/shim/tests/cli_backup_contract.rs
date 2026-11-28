@@ -1265,3 +1265,124 @@ fn docker_that_cannot_be_asked_never_becomes_a_backup_without_its_database() {
         "{output:?}"
     );
 }
+
+/// pg_dump finds the password in its own environment, never in argv (which
+/// any account on the host can read), and a dump run leaves nothing another
+/// account can read even under a permissive umask.
+#[cfg(unix)]
+#[test]
+fn explicit_dsn_dump_keeps_the_password_out_of_argv_and_outputs_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new("private-dump");
+    let bank = home.path().join("bank");
+    fs::create_dir(&bank).unwrap();
+    fs::write(bank.join("state.txt"), b"state").unwrap();
+    let bin = home.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let record = home.path().join("record.txt");
+    let fake = bin.join("pg_dump");
+    let script = [
+        "#!/bin/sh",
+        "printf 'arg=%s\\n' \"$@\" > \"$RECORD\"",
+        "printf 'PGPASSWORD=%s\\n' \"${PGPASSWORD-unset}\" >> \"$RECORD\"",
+        "echo 'SELECT 1;'",
+        "",
+    ];
+    fs::write(&fake, script.join("\n")).unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+    // umask 022 is the common default that leaves new files world-readable.
+    let backup_with = |dsn: &str, extra: &[(&str, &str)]| {
+        cli::cleared_command(Path::new("/bin/sh"))
+            .args(["-c", "umask 022; exec \"$0\" \"$@\""])
+            .arg(env!("CARGO_BIN_EXE_pseudolife-stdio"))
+            .args(["backup", "--data-dir", &text(&bank)])
+            .current_dir(home.path())
+            .env("HOME", home.path())
+            .env("COLUMNS", "80")
+            .env("PSEUDOLIFE_DOCKER", home.path().join("no-docker"))
+            .env("PATH", &bin)
+            .env("RECORD", &record)
+            .env("PSEUDOLIFE_MCP_DATABASE_URL", dsn)
+            .envs(extra.iter().copied())
+            .output()
+            .unwrap()
+    };
+    let backup = |dsn: &str| backup_with(dsn, &[]);
+    // Secrets that only argv could carry, and a password a service would
+    // displace, are refused before pg_dump starts.
+    let service = "in that service's entry instead";
+    for (dsn, extra, fix) in [
+        ("host=127.0.0.1 sslpassword=key", &[][..], "service=<name>"),
+        ("host=127.0.0.1 service=mine password=pw", &[], service),
+        (
+            "postgresql://owner:pw@127.0.0.1:9/bank",
+            &[("PGSERVICE", "mine")],
+            service,
+        ),
+    ] {
+        let output = backup_with(dsn, extra);
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.starts_with("backup failed: PSEUDOLIFE_MCP_DATABASE_URL carries")
+                && stderr.contains(fix)
+                && stderr.contains(NOTHING),
+            "{stderr}"
+        );
+        assert!(!record.exists(), "pg_dump ran for {dsn}");
+    }
+    for (dsn, argv) in [
+        (
+            "postgresql://owner:s3cret%21@127.0.0.1:9/bank?sslmode=disable",
+            "arg=--dbname\narg=postgresql://owner@127.0.0.1:9/bank?sslmode=disable\n",
+        ),
+        (
+            "host=127.0.0.1 port=9 password='s3cret!' dbname=bank",
+            "arg=--dbname\narg=host=127.0.0.1 port=9  dbname=bank\n",
+        ),
+        // Nothing but the password: libpq takes the rest from its defaults.
+        ("password=s3cret!", ""),
+    ] {
+        let _ = fs::remove_dir_all(bank.join("backups"));
+        let output = backup(dsn);
+        assert_eq!(output.status.code(), Some(0), "{output:?}");
+        let recorded = fs::read_to_string(&record).unwrap();
+        assert_eq!(
+            recorded,
+            format!("arg=--no-owner\narg=--no-acl\n{argv}PGPASSWORD=s3cret!\n"),
+            "{dsn}"
+        );
+        let backups = bank.join("backups");
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&backups), 0o700, "{dsn}");
+        let mut written: Vec<_> = fs::read_dir(&backups)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        written.sort();
+        assert_eq!(written.len(), 2, "{written:?}");
+        for path in &written {
+            assert_eq!(mode(path), 0o600, "{}", path.display());
+        }
+        let dump = written
+            .iter()
+            .find(|path| path.to_string_lossy().ends_with(".sql.gz"))
+            .unwrap();
+        let mut sql = String::new();
+        flate2::read::GzDecoder::new(fs::File::open(dump).unwrap())
+            .read_to_string(&mut sql)
+            .unwrap();
+        assert_eq!(sql, "SELECT 1;\n");
+    }
+    // A string without a password leaves an inherited PGPASSWORD alone.
+    let _ = fs::remove_dir_all(bank.join("backups"));
+    let output = backup_with(
+        "postgresql://owner@127.0.0.1:9/bank",
+        &[("PGPASSWORD", "inherited")],
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(
+        fs::read_to_string(&record).unwrap(),
+        "arg=--no-owner\narg=--no-acl\narg=--dbname\narg=postgresql://owner@127.0.0.1:9/bank\nPGPASSWORD=inherited\n"
+    );
+}
