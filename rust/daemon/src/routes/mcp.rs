@@ -166,6 +166,11 @@ mod tests {
             Some("LOCALHOST:1"),
             Some("127.0.0.2:1"),
             Some("0.0.0.0:8765"),
+            // Something after the port.
+            Some("localhost:1.evil.example"),
+            Some("127.0.0.1:8765@evil.example"),
+            Some("[::1]:8765]"),
+            Some("127.0.0.1:"),
         ] {
             let extra: Vec<(&str, &str)> = host.map(|h| ("host", h)).into_iter().collect();
             let (status, body) = initialize(&app, &extra).await;
@@ -185,6 +190,8 @@ mod tests {
             "http://localhost",
             "null",
             "http://localhost.evil.example:1",
+            "http://localhost:1.evil.example",
+            "http://127.0.0.1:8765@evil.example",
         ] {
             let (status, body) =
                 initialize(&app, &[("host", "127.0.0.1:8765"), ("origin", origin)]).await;
@@ -364,10 +371,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_first_host_counts_and_the_port_is_matched_by_prefix() {
-        // As the SDK does: Starlette's `headers.get` takes the first Host, and
-        // `_validate_host` / `_validate_origin` compare a prefix ending in the
-        // colon. No browser sends a Host or Origin with a non-numeric port.
+    async fn the_first_host_counts_and_the_port_must_be_digits() {
+        // As the SDK does, Starlette's `headers.get` takes the first Host. The
+        // SDK's `_validate_host` / `_validate_origin` accept any text after the
+        // colon; this daemon accepts only a port there, since no browser sends
+        // anything else and `localhost:1.evil.example` must not pass.
         let app = app(None);
         for (extra, want) in [
             (
@@ -394,10 +402,13 @@ mod tests {
                 ],
                 StatusCode::FORBIDDEN,
             ),
-            (vec![("host", "127.0.0.1:notaport")], StatusCode::OK),
+            (
+                vec![("host", "127.0.0.1:notaport")],
+                StatusCode::MISDIRECTED_REQUEST,
+            ),
             (
                 vec![("host", "127.0.0.1:8765"), ("origin", "http://localhost:x")],
-                StatusCode::OK,
+                StatusCode::FORBIDDEN,
             ),
         ] {
             let (status, body) = initialize(&app, &extra).await;

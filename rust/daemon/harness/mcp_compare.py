@@ -534,7 +534,9 @@ def rebinding_edges(port):
                   [good, ("Origin", "null")],
                   [good, ("Origin", "http://localhost.evil.example:1")],
                   # The SDK matches a prefix, so any text after the colon passes;
-                  # no browser sends a Host or Origin like these.
+                  # no browser sends a Host or Origin like these. Since 27 November
+                  # 2026 the Rust daemon accepts only digits there and refuses both
+                  # (421, 403): MCP-PORT-DIGITS, declared in mcp_ci.TOKENLESS_DECLARED.
                   [("Host", "127.0.0.1:notaport")],
                   [good, ("Origin", "http://localhost:x")],
                   # Duplicate Host headers: the first one counts.

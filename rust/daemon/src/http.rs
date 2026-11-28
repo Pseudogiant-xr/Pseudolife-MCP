@@ -255,7 +255,17 @@ fn host_part(value: &str) -> Result<String, ()> {
     }
     let v = crate::storage::py_strip(&v).to_lowercase();
     if let Some(rest) = v.strip_prefix('[') {
-        return Ok(rest.split(']').next().unwrap_or("").to_string());
+        // A bracketed host is the whole host: `]` then nothing or `:<port>`.
+        // Anything else (`[::1]@evil.example`, `[::1]x`, no `]`) is no host
+        // the gate trusts, so the whole value is compared, and never matches.
+        let whole = rest.split_once(']').filter(|(host, after)| {
+            !host.contains(['[', '@'])
+                && (after.is_empty()
+                    || after
+                        .strip_prefix(':')
+                        .is_some_and(|port| port.bytes().all(|b| b.is_ascii_digit())))
+        });
+        return Ok(whole.map_or(v.clone(), |(host, _)| host.to_string()));
     }
     if v.matches(':').count() == 1 {
         return Ok(v.rsplit_once(':').map(|(h, _)| h.to_string()).unwrap_or(v));
@@ -1680,6 +1690,33 @@ pub(crate) mod tests {
         assert!(host_part("http://[::1").is_err());
         assert!(host_part("http://[localhost]").is_err());
         assert!(host_part("http://[127.0.0.1]").is_err());
+    }
+
+    #[test]
+    fn host_part_reads_a_bracket_only_as_the_whole_host() {
+        let ok = |v: &str| host_part(v).unwrap();
+        // Something after `]` other than a port: compared whole, never loopback.
+        for value in [
+            "[::1]@evil.example",
+            "[::1]evil.example",
+            "[::1]:8765]",
+            "[::1]:80x",
+            "[[::1]]",
+        ] {
+            assert_eq!(ok(value), value, "{value}");
+            // As an Origin it is either refused by urlsplit or not loopback.
+            if let Ok(host) = host_part(&format!("http://{value}")) {
+                assert!(
+                    !matches!(host.as_str(), "127.0.0.1" | "::1" | "localhost"),
+                    "{value}: {host}"
+                );
+            }
+        }
+        // The near misses: a bare or ported bracketed host still reads.
+        assert_eq!(ok("[::1]"), "::1");
+        assert_eq!(ok("[::1]:8765"), "::1");
+        assert_eq!(ok("http://[::1]:8765"), "::1");
+        assert_eq!(ok("http://[::1%eth0]:5"), "::1%eth0");
     }
 }
 

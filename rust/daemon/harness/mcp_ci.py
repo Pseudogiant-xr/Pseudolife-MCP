@@ -57,12 +57,22 @@ def check_baseline(report):
     assert seen == REFUSAL_CLOSE
 
 
+# MCP-PORT-DIGITS (27 November 2026): the Rust daemon accepts only a numeric
+# port after an allowlisted Host or Origin, where the SDK accepts any text.
+# `rebinding_edges` opens a session with `127.0.0.1:notaport` (responses 10,
+# 11) and with Origin `http://localhost:x` (12, 13); Python serves both and
+# Rust refuses them (421, 403). The indices follow the case's request order.
+TOKENLESS_DECLARED = frozenset(f"rebinding_edges[{index}]" for index in (10, 11, 12, 13))
+
+
 def check_tokenless(report):
-    """The tokenless corpus matches the oracle exactly."""
+    """The tokenless corpus matches the oracle but for the declared port rule."""
     summary = report["summary"]
     assert (summary["responses"], summary["cases"], summary["diffs"]) == (
-        TOKENLESS_RESPONSES, len(TOKENLESS_CASES) + 1, 0), summary
-    assert summary["unserved_checked"] == [] and report["diffs"] == []
+        TOKENLESS_RESPONSES, len(TOKENLESS_CASES) + 1, len(TOKENLESS_DECLARED)), summary
+    assert summary["unserved_checked"] == []
+    names = sorted(diff.split(": python=", 1)[0] for diff in report["diffs"])
+    assert names == sorted(TOKENLESS_DECLARED), names
 
 
 def check_coercion_report(report):
@@ -122,10 +132,12 @@ def main(argv=None):
     check_baseline(report)
     assert not mutant_caught(1, report, baseline)
     if sys.platform in TOKENLESS_PLATFORMS:
-        tokenless_file = run("tokenless", args.default_bin, ["--tokenless"], 0) / "compare.json"
+        # Exit 1: the corpus carries the declared port-rule differences.
+        tokenless_file = run("tokenless", args.default_bin, ["--tokenless"], 1) / "compare.json"
         tokenless = json.loads(tokenless_file.read_text(encoding="utf-8"))
         check_tokenless(tokenless)
-        print(f"tokenless baseline: {TOKENLESS_RESPONSES} responses, zero differences", flush=True)
+        print(f"tokenless baseline: {TOKENLESS_RESPONSES} responses, "
+              f"{len(TOKENLESS_DECLARED)} declared differences (MCP-PORT-DIGITS)", flush=True)
         for mutant in TOKENLESS_MUTANTS:
             target = run(f"tokenless-{mutant}", args.mutant_bin,
                          ["--tokenless", "--mutant", mutant, "--baseline", str(tokenless_file)], 0)

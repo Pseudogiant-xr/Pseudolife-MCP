@@ -52,10 +52,23 @@ pub fn validate(value: &str) -> Result<String, &'static str> {
     Ok(format!("{scheme}://{authority}"))
 }
 
+/// The host and port of an authority. A bracketed host is the whole host:
+/// the authority starts with `[`, and the `]` is followed by nothing or by
+/// `:<port>`. Userinfo and any other `[` or `]` refuse the authority, so
+/// `evil.example[::1]` or `[::1]@evil.example` never reads as loopback.
 fn host_port(authority: &str) -> Option<(&str, Option<&str>)> {
+    if authority.contains('@') {
+        return None;
+    }
     if authority.contains('[') || authority.contains(']') {
-        let (_, rest) = authority.split_once('[')?;
+        let rest = authority.strip_prefix('[')?;
         let (host, rest) = rest.split_once(']')?;
+        if host.contains('[')
+            || rest.contains(['[', ']'])
+            || !(rest.is_empty() || rest.starts_with(':'))
+        {
+            return None;
+        }
         if let Some(future) = host.strip_prefix('v') {
             let (version, address) = future.split_once('.')?;
             if version.is_empty()
@@ -72,7 +85,7 @@ fn host_port(authority: &str) -> Option<(&str, Option<&str>)> {
                 return None;
             }
         }
-        let port = rest.split_once(':').map(|(_, port)| port);
+        let port = rest.strip_prefix(':');
         Some((host, port))
     } else {
         Some(

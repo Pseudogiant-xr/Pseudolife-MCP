@@ -64,6 +64,17 @@ async fn fetch(status: u16, headers: &[(&str, &str)], body: &str) -> FetchResult
 }
 
 #[tokio::test]
+async fn a_release_answer_past_the_body_cap_is_not_read() {
+    let release = complete_release().to_string();
+    let padded = |total: usize| format!("{release}{}", " ".repeat(total - release.len()));
+    // The near miss: a document exactly at the cap still reads.
+    let at_cap = fetch(200, &[], &padded(MAX_RELEASE_BODY)).await.latest;
+    assert_eq!(at_cap.as_deref(), Some("0.25.0"));
+    let over = fetch(200, &[], &padded(MAX_RELEASE_BODY + 1)).await.latest;
+    assert_eq!(over, None);
+}
+
+#[tokio::test]
 async fn github_release_payload_replaces_pypi() {
     assert_eq!(
         fetch(200, &[], &complete_release().to_string())

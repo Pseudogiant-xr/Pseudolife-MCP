@@ -2,11 +2,12 @@
 served behind the SDK's loopback Host/Origin allowlist (spec.md M4), checked
 on every request, the stateless era's included. `mcp_ci.py` compares the
 tokenless corpus (`rebinding`, `rebinding_edges`, `open_lists`) with Python,
-legitimate near misses beside each refusal, with no declared difference,
+legitimate near misses beside each refusal, with one declared difference
+(MCP-PORT-DIGITS),
 and catches `mcp-bare-host`, `mcp-any-origin` and `mcp-era-skips-security`.
 The corpus runs on Linux; on both OSes the `routes/mcp.rs` tests run the
 same Host and Origin cases in-process against the Python answers they
-pin (the near misses, duplicate headers, the prefix rule, the stateless era,
+pin (the near misses, duplicate headers, the numeric-port rule, the stateless era,
 bound identity, router order and a live session's POST, GET and DELETE), and
 the W1-A `tokenless` golden compares `GET /mcp` with Python's recorded 406.
 **MCP-BOUND-IDENTITY** is closed: an authenticated `/mcp` request carrying

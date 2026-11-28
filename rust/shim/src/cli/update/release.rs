@@ -24,6 +24,10 @@ const COMPOSE_FILES: [&str; 6] = [
     "docker-compose.rust-ghcr.yml",
     "Dockerfile.extractor",
 ];
+/// What a Compose bundle may unpack to: its six files are each at most
+/// 1 MiB, so anything past this is not a bundle, and the drain after the
+/// tar entries must not inflate it (a 16 MiB download can expand ~1000x).
+const COMPOSE_UNPACKED_LIMIT: u64 = 8 * 1024 * 1024;
 
 pub(super) fn health_endpoint_hint(ports: &str) -> String {
     let mut urls = std::collections::BTreeSet::new();
@@ -90,7 +94,7 @@ pub(super) fn verified_compose(
             "the Compose release archive checksum is missing or does not match; nothing was deployed",
         ));
     }
-    let mut decoder = flate2::read::MultiGzDecoder::new(archive);
+    let mut decoder = flate2::read::MultiGzDecoder::new(archive).take(COMPOSE_UNPACKED_LIMIT + 1);
     let mut result = BTreeMap::new();
     {
         let mut tar = tar::Archive::new(&mut decoder);
@@ -122,6 +126,11 @@ pub(super) fn verified_compose(
         }
     }
     std::io::copy(&mut decoder, &mut std::io::sink())?;
+    if decoder.limit() == 0 {
+        return Err(UpdateError::new(
+            "the Compose release archive unpacks to more than 8 MiB, which no Compose bundle does; nothing was deployed",
+        ));
+    }
     if COMPOSE_FILES.iter().any(|n| !result.contains_key(*n)) {
         return Err(UpdateError::new(
             "the release Compose archive is incomplete; nothing was deployed",

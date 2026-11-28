@@ -132,20 +132,28 @@ def test_ci_rejects_missing_or_failed_coercion_evidence(failure):
 
 def tokenless_report():
     import mcp_ci
+    diffs = [line(name, {"status": 200}, {"status": 421}) for name in sorted(mcp_ci.TOKENLESS_DECLARED)]
     return {"summary": {"responses": mcp_ci.TOKENLESS_RESPONSES, "cases": len(mcp_ci.TOKENLESS_CASES) + 1,
-                        "diffs": 0, "unserved_checked": []}, "diffs": []}
+                        "diffs": len(diffs), "unserved_checked": []}, "diffs": diffs}
 
 
-def test_tokenless_corpus_declares_no_difference():
+def test_tokenless_corpus_declares_only_the_port_rule():
     import mcp_ci
     assert mcp_ci.TOKENLESS_RESPONSES == 66
     assert mcp_ci.TOKENLESS_MUTANTS == ("mcp-bare-host", "mcp-any-origin", "mcp-era-skips-security")
+    assert mcp_ci.TOKENLESS_DECLARED == {f"rebinding_edges[{i}]" for i in (10, 11, 12, 13)}
     mcp_ci.check_tokenless(tokenless_report())
-    for change in ("diff", "short", "unserved"):
+    for change in ("diff", "missing", "swapped", "short", "unserved"):
         report = tokenless_report()
-        if change == "diff":
-            report["diffs"] = ["rebinding[0]: python=1\n          rust  =2"]
-            report["summary"]["diffs"] = 1
+        if change == "swapped":
+            # The count matches; one declared name is replaced by another.
+            report["diffs"][0] = "rebinding[0]: python=1\n          rust  =2"
+        elif change == "diff":
+            report["diffs"].append("rebinding[0]: python=1\n          rust  =2")
+            report["summary"]["diffs"] += 1
+        elif change == "missing":
+            report["diffs"].pop()
+            report["summary"]["diffs"] -= 1
         elif change == "short":
             report["summary"]["responses"] -= 1
         else:
@@ -179,7 +187,8 @@ def test_tokenless_runs_on_linux_only(tmp_path, monkeypatch, platform):
             report["summary"]["diffs"] = 1
         (target / (f"mutant-{mutant}.json" if mutant else "compare.json")).write_text(
             json.dumps(report), encoding="utf-8")
-        return subprocess.CompletedProcess(command, 0)
+        # The baseline carries its declared differences, so it exits 1.
+        return subprocess.CompletedProcess(command, 0 if mutant else 1)
 
     monkeypatch.setattr(mcp_ci.sys, "platform", platform)
     monkeypatch.setattr(mcp_ci.subprocess, "run", run)
